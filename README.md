@@ -131,12 +131,21 @@ T1 above.
 ### Data handling
 
 **H1 — What leaves the machine, and what does not.**
-Each request sends the *schema* (table names, column names, types) and the
-user's question to the LLM provider. Row data never leaves: the model writes
-SQL, and that SQL is executed locally against SQLite. Customer names, emails
-and order values are never transmitted to a third party. Seed emails use
-`example.com`, an IANA-reserved domain, so no real personal data exists in the
-repository either.
+Two things are sent to the LLM provider on every question: the *schema*
+(table and column names and types) and the user's question. A third thing is
+sent when a query succeeds — the **result rows**, because `build_answer_messages`
+passes them to the model to be summarised into a sentence.
+
+An earlier version of this note claimed row data never leaves the machine.
+That was true of SQL generation and false of answer formatting, and the
+distinction matters: a question like "list all customer emails" would send
+those emails to a third party. The rows are capped at 20 before sending, and
+the seed data is synthetic with `example.com` addresses, so nothing real is
+exposed here. On real data this design would need either local formatting of
+results or an explicit decision to accept it.
+
+The database file itself, credentials, and any row not selected by the query
+are never transmitted.
 
 **H2 — Free LLM tiers generally train on your prompts.**
 This is the trade for a no-credit-card tier and is acceptable for a demo built
@@ -203,3 +212,126 @@ the prose layout, so reformatting the description does not break the test.
 as file content. Putting a `!pytest` command in the same cell writes the
 command into the file instead of running it, and produces a confusing argument
 parsing error. One magic per cell.
+
+### Known limitations (continued)
+
+**L6 — The LLM model name is a moving target.**
+Free-tier providers retire and rename models frequently, often with little
+notice. A model string that works today may return a 404 in a few months, and
+the failure is opaque: the app looks broken rather than misconfigured. Two
+mitigations here: the model name is read from the `GROQ_MODEL` environment
+variable with a hardcoded default, so it can be changed on the deployment
+platform without a code change; and the startup path fails with an explicit
+message naming the model rather than a raw API error. Anyone reviving this
+project should check the provider's current model list first.
+
+**L7 — Free tiers themselves are not stable.**
+Rate limits, model availability and the terms of no-credit-card access have all
+changed repeatedly. This project is built to be portable rather than tied to
+one provider: the LLM is reached through a single client object, so switching
+providers means changing one module, not the agent logic.
+
+### LLM provider verification (Phase 3 step)
+
+**V1 — Model availability was checked against the API, not documentation.**
+Before writing any agent code, the model list was pulled from the provider
+directly, because published model names go stale (see L6) and a 404 on an
+invented model string is an opaque failure. Verified 14 August 2026 with:
+
+```python
+from groq import Groq
+models = sorted(m.id for m in Groq().models.list().data)
+```
+
+15 models were reachable on the free tier, including `llama-3.3-70b-versatile`
+(used here) and `llama-3.1-8b-instant` (higher daily quota, lower quality).
+Free-tier limits at the time: 30 requests/minute, 1,000 requests/day for the
+70B model.
+
+**V2 — Connectivity was proved through the client the app actually uses.**
+A raw SDK call proving the key works does not prove the LangChain wrapper is
+configured correctly. The smoke test therefore goes through `ChatGroq`, the
+same client `agent.py` uses:
+
+```python
+llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+llm.invoke([{"role": "system", "content": "Reply with exactly one word."},
+            {"role": "user", "content": "Say OK"}])
+```
+
+Response: `'OK'`, 43 prompt + 2 completion tokens. Establishing this before
+building the graph means any later failure is attributable to the graph, not
+to authentication or model naming.
+
+**V3 — `temperature=0` for every call.**
+The same question should produce the same SQL. Sampling variety is a liability
+in query generation: it makes failures non-reproducible and makes a working
+query occasionally stop working.
+
+**V4 — A dedicated injection classifier was considered and rejected.**
+The provider offers `meta-llama/llama-prompt-guard-2-86m`, a model trained to
+detect prompt injection. It was not used: it would add a second API call to
+every question against a 30/minute limit, the `OUT_OF_SCOPE` token already
+handles scope in the existing call, and neither is the actual security
+boundary — the validator and the SQLite authorizer are (see S1, S2). Spending
+a request on a defence that is not load-bearing is the wrong trade here.
+
+### Design decisions (continued)
+
+**D6 — The LLM client is created lazily, not at import time.**
+`agent.get_llm()` builds the client on first use. Creating it at import would
+make `import app.agent` fail without an API key, which would break the
+`/health` endpoint and force every test to hold a live credential.
+`set_llm()` is the injection seam the test suite uses.
+
+**D7 — The retry edge routes back to `validate`, not to `execute`.**
+SQL from the retry call is exactly as untrusted as SQL from the first call, so
+it passes through the same gate. Routing it straight to execution would be a
+real hole rather than a shortcut.
+
+**D8 — The retry cap is structural, not a counter.**
+`route_after_execute` sends work to the retry node only when an error is set
+*and* `retry_count == 0`. The retry node sets `retry_count = 1`, so a second
+failure has no edge back. This is a property of the graph rather than a guard
+someone could later modify.
+
+### Testing approach (continued)
+
+**T5 — The agent suite runs entirely offline against a fake LLM.**
+`set_llm()` injects a scripted stub exposing `.invoke(messages).content` — the
+only surface `agent.py` touches. Everything below the model is real: the
+validator runs, the graph routes, and queries hit the actual SQLite file, so
+the integration is genuinely tested rather than mocked away. The stub raises if
+called more times than scripted, which is how "no third LLM call after a failed
+retry" is enforced instead of merely assumed. 56 tests total, no API calls, no
+rate limits, deterministic.
+
+**T6 — Module-level globals must be reset between tests.**
+`agent._llm` and `agent._graph` are module-level, so a fake installed by one
+test would persist into the next. An `autouse` fixture clears both before and
+after every test.
+
+### Verified test evidence (continued)
+
+Phase 4, live run against `llama-3.3-70b-versatile`:
+
+- "Which 3 customers have spent the most?" produced a three-table join using
+  `oi.unit_price * oi.quantity` and filtering `status != 'cancelled'` — both
+  domain rules from D5 applied — returning Vikram Nair Rs 33,895, Ananya Iyer
+  Rs 28,796, Dev Chauhan Rs 21,999, matching the values computed directly
+  against the seed data.
+- Follow-up "What about just the ones in Mumbai?" — a question with no
+  standalone meaning — correctly reconstructed the full aggregation from
+  replayed history and added a single `c.city = 'Mumbai'` clause, keeping the
+  cancelled-order filter.
+- "Write me a Python function to reverse a string" returned
+  `out_of_scope=True`, `sql=None`, and the database was not queried.
+
+### Known limitations (continued)
+
+**L8 — Generated SQL groups by `c.name` rather than `c.id`.**
+Observed in the live run. Two customers sharing a name would be merged into a
+single row. No duplicate names exist in the seed data so it cannot occur here,
+but it is a real correctness issue in generated SQL that validation cannot
+catch — the query is syntactically valid and semantically reasonable. Fixing it
+would mean either a stricter prompt rule or post-generation SQL analysis.
