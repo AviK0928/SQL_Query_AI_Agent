@@ -127,3 +127,79 @@ SELECT-prefix check rather than the keyword list.
 
 Phase 2: 32 validator tests passing. Mutation testing results as described in
 T1 above.
+
+### Data handling
+
+**H1 — What leaves the machine, and what does not.**
+Each request sends the *schema* (table names, column names, types) and the
+user's question to the LLM provider. Row data never leaves: the model writes
+SQL, and that SQL is executed locally against SQLite. Customer names, emails
+and order values are never transmitted to a third party. Seed emails use
+`example.com`, an IANA-reserved domain, so no real personal data exists in the
+repository either.
+
+**H2 — Free LLM tiers generally train on your prompts.**
+This is the trade for a no-credit-card tier and is acceptable for a demo built
+on synthetic data. It would not be acceptable with real customer records —
+which is a second, independent reason the design keeps row data local.
+
+### Process notes
+
+**P1 — `!command` in Colab does not report failure to Python.**
+A shell command run with `!` executes in a subshell; a non-zero exit does not
+raise, and `get_ipython().system()` returns `None` in Colab regardless of
+outcome. A `print("done")` on the following line therefore prints on failure
+too. Three pushes appeared to succeed or fail incorrectly because of this.
+Correct approach where the result matters: `subprocess.run(..., 
+capture_output=True)` and check `returncode`.
+
+**P2 — Credentials in git remote URLs.**
+The push token is embedded in the URL for a single command rather than stored
+via `git config` or `git remote set-url`, so it is never written to
+`.git/config` where it would persist on disk and survive in any later output.
+Git error messages can echo the remote URL, so stderr is filtered before
+printing.
+
+**P3 — Commit author email is public on a public repo.**
+An early commit was made with a personal address before the noreply alias was
+configured. GitHub exposes commit metadata publicly and these addresses are
+scraped. Later commits use `<username>@users.noreply.github.com`. History was
+not rewritten: force-pushing a submission repo to scrub two commits carries
+more risk than the exposure justifies.
+
+### Design decisions (continued)
+
+**D4 — Scope classification is merged into the SQL generation call.**
+The reference design used a separate LLM call to decide whether a question was
+in scope, then another to generate SQL. Instead the SQL prompt instructs the
+model to return either a query or the literal token `OUT_OF_SCOPE`, so one call
+does both. This halves the fixed cost per question (1-3 calls instead of 2-4),
+removes a round trip of latency, and eliminates a class of bug where the two
+calls disagree. The cost is a branch on the response string.
+
+**D5 — Domain rules live in the prompt, not in post-processing.**
+Two rules encode knowledge the model cannot infer from column names alone:
+revenue must use `order_items.unit_price` rather than `products.price` (D1),
+and cancelled orders are excluded from totals by default. Without these the
+model produces plausible but subtly wrong figures - the worst failure mode for
+this kind of tool, because nothing looks broken.
+
+### Testing approach (continued)
+
+**T4 — Schema drift test.**
+`prompts.py` restates the database schema in prose for the LLM to read. That
+prose can silently fall out of sync with `schema.sql`. When it does, the model
+writes SQL against columns that no longer exist and the failure presents as
+poor model quality rather than stale configuration. `test_prompts.py` asserts
+in both directions against a live `get_schema()` call: every real table and
+column must appear in the prompt, and the prompt must not describe tables that
+do not exist. The column check deliberately matches loosely rather than parsing
+the prose layout, so reformatting the description does not break the test.
+
+### Process notes (continued)
+
+**P4 — Colab cell magics claim the entire cell.**
+`%%writefile` must be the first line of a cell and captures everything below it
+as file content. Putting a `!pytest` command in the same cell writes the
+command into the file instead of running it, and produces a confusing argument
+parsing error. One magic per cell.
