@@ -335,3 +335,75 @@ single row. No duplicate names exist in the seed data so it cannot occur here,
 but it is a real correctness issue in generated SQL that validation cannot
 catch — the query is syntactically valid and semantically reasonable. Fixing it
 would mean either a stricter prompt rule or post-generation SQL analysis.
+
+### Process notes (continued)
+
+**P5 — The web server cannot be reached from a browser in Colab.**
+Colab's VM has no public address, so `uvicorn app.main:app --reload` starts a
+server that nothing outside the notebook can reach. Tunnelling tools (ngrok and
+similar) would expose it, but they require a third-party account, and one of
+them would be an unnecessary external dependency for a $0 project.
+
+Instead the server is started on `127.0.0.1` in a background thread inside the
+notebook and driven with `httpx` from the same process. This is not a
+workaround so much as the right shape: it is exactly what the Phase 7 API tests
+do, so the manual check and the automated tests exercise the same path. Real
+browser testing happens against the deployed Render URL, where a browser can
+actually reach it.
+
+**P6 — Git does not track empty directories.**
+`frontend/` was created in Phase 1 but stayed empty, so it does not exist in the
+repository and will not exist on a fresh clone — including on Render. Any code
+that mounts it as a static directory at import time would crash on deploy with
+a confusing path error. `main.py` therefore checks for the directory before
+mounting and serves a plain message when the frontend is absent, so the API is
+independently runnable before Phase 6 exists.
+
+### Design decisions (continued)
+
+**D9 — Query failures return HTTP 200 with a populated `error` field.**
+A question the agent cannot answer is a normal outcome of this application, not
+a transport failure. Returning 4xx/5xx would mean the frontend needs two
+response-handling paths and would conflate "the model wrote bad SQL" with "the
+server is broken". One shape, one path. Genuine transport failures still use
+real status codes — malformed requests are rejected by Pydantic with a 422
+before any handler runs.
+
+**D10 — Conversation history lives on the server, keyed by `session_id`.**
+The client sends only a question and a session id; it never sends prior turns.
+This keeps the browser from being able to forge or replay context, and means the
+history-truncation rule (`MAX_HISTORY_TURNS`) is enforced in one place. Only
+*successful* queries are stored: replaying SQL that failed would teach the model
+its own mistakes.
+
+**D11 — `/health` deliberately touches neither the database nor the LLM.**
+Render pings this endpoint to decide whether the instance is alive. If it
+called Groq, a rate-limit response or a provider outage would read as "the
+application is down" and trigger a restart that fixes nothing. Liveness and
+dependency health are different questions and should not share an endpoint.
+
+### Known limitations (continued)
+
+**L9 — Session storage is an unbounded dict with crude eviction.**
+Sessions accumulate in a module-level dict, capped at `MAX_SESSIONS = 500` with
+oldest-first eviction. This is insertion-ordered, not least-recently-used, so an
+active session can be evicted while a stale one survives. The cap exists because
+without it the dict grows for every unique `session_id` forever — a slow leak
+and a trivial way to exhaust a 512 MB free instance. A real system would use a
+TTL cache or Redis; both are out of scope here (see L3).
+
+### Verified test evidence (continued)
+
+Phase 5, live server driven by `httpx` over loopback:
+
+- `GET /health` -> 200 `{"status": "ok"}`
+- `GET /schema` -> all four tables
+- `GET /` -> 200 (placeholder JSON; frontend not yet built)
+- `POST /chat` with an empty question -> 422, rejected by Pydantic before
+  reaching the agent, so no LLM request was spent
+- `POST /chat` with no body -> 422
+- A question and a follow-up on the same `session_id`, with **no history in the
+  request payload**, produced a correctly context-aware query: the follow-up
+  reconstructed the full three-table revenue aggregation and added only
+  `c.city = 'Mumbai'`, confirming server-side session memory
+- An out-of-scope request returned `out_of_scope: true` and no SQL
