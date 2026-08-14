@@ -461,3 +461,45 @@ previous server process started):
 - `GET /static/app.js` -> 200 `text/javascript`
 - `POST /chat` "How many orders were cancelled?" -> `2 orders were cancelled`,
   matching the two cancelled orders planted in the seed data
+
+### Testing approach (continued)
+
+**T7 — API tests fake only the LLM, not the stack beneath it.**
+`tests/test_api.py` uses FastAPI's `TestClient`, which calls the ASGI app
+in-process with no socket and no server thread. Pydantic validation, the
+LangGraph flow, the SQL validator, the real `ecommerce.db` file, JSON
+serialisation and HTTP status codes all execute for real. Only the model is
+substituted, because it is the one component that is neither free nor
+deterministic. These are integration tests with one seam, not unit tests with
+everything mocked.
+
+**T8 — Negative tests script the model to comply, not to refuse.**
+The brief requires a test that "Delete all users" is rejected. With a fake LLM
+it would be trivial to script `OUT_OF_SCOPE` and claim a pass — but that tests
+the model's cooperation, which is not a property this system guarantees. The
+test instead scripts `DELETE FROM customers` on both the first attempt and the
+retry: the worst case, where the model fully obeys a hostile request. The
+assertion is that the validator blocks it, no rows are returned, and all four
+tables still exist afterwards. The same pattern is used for `DROP TABLE` under
+a prompt-injection question.
+
+**T9 — Two tests assert on what did *not* happen.**
+`test_empty_question_never_reaches_the_agent` scripts a fake with zero
+responses, so any call to it raises, then asserts `fake.calls == []` after a
+422 — proving Pydantic rejected the request before any LLM request was spent.
+`test_provider_failure_returns_a_generic_message` raises an exception whose
+message contains a fake credential and asserts that neither the credential nor
+the word `Traceback` appears in the response body, proving the broad `except`
+in `/chat` does not leak exception text to clients.
+
+**T10 — Test counts are verified with `--collect-only`, not estimated.**
+Expected counts were wrong twice during this project (45 vs 44, 75 vs 76), both
+times through miscounting rather than missing tests. A count that does not match
+expectation is the signal that a parametrize block was clipped during a paste,
+so the discrepancy is always resolved by collecting rather than by assuming.
+
+### Verified test evidence (continued)
+
+Phase 7: 76 tests passing, 7.8s, no network access and no API key required.
+Breakdown: 32 validator, 12 prompts, 12 agent, 20 API. All four test categories
+required by the brief are covered by the automated suite.
