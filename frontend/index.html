@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SQL Query AI Agent</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <header>
+    <h1>SQL Query AI Agent</h1>
+    <p class="subtitle">Ask questions about an e-commerce database in plain English.</p>
+  </header>
+
+  <main>
+    <section id="chat" aria-live="polite">
+      <div class="message agent">
+        <div class="bubble">
+          <p>Ask me about customers, products, orders or revenue.</p>
+          <p class="hint">
+            Try: <button class="example">Which 3 customers have spent the most?</button>
+            <button class="example">How many orders were cancelled?</button>
+            <button class="example">Which customers have never ordered?</button>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <div id="composer">
+      <input
+        id="question"
+        type="text"
+        placeholder="Ask a question about the database..."
+        maxlength="500"
+        autocomplete="off"
+        autofocus>
+      <button id="send">Send</button>
+    </div>
+
+    <details id="schema-panel">
+      <summary>Database schema</summary>
+      <div id="schema-content">Loading…</div>
+    </details>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

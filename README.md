@@ -407,3 +407,57 @@ Phase 5, live server driven by `httpx` over loopback:
   reconstructed the full three-table revenue aggregation and added only
   `c.city = 'Mumbai'`, confirming server-side session memory
 - An out-of-scope request returned `out_of_scope: true` and no SQL
+
+### Design decisions (continued)
+
+**D12 — The session id is a plain JavaScript variable, not `sessionStorage`.**
+It resets on page refresh. This was chosen over persisting it because server-side
+sessions are process-local and lost on restart (L3), and a free-tier instance
+sleeps after 15 minutes idle (L4). Persisting the id across a refresh would
+therefore produce a reference to a session the server has very likely already
+discarded — the client would look like it had memory while the server had none.
+A plain variable makes the client's guarantee match the server's actual one.
+
+**D13 — Model output is inserted with `textContent`, never `innerHTML`.**
+The model's prose reply and the database values rendered into the results table
+are both untrusted output. `innerHTML` would execute any markup they contained;
+`textContent` renders it as visible characters. This is the same principle as
+the SQL validator applied at a different layer: LLM output is not trusted
+because it came from our own prompt.
+
+**D14 — A `busy` flag guards against concurrent requests.**
+Disabling the send button is only the visible half — the Enter key bypasses it.
+Without the flag, two in-flight questions can resolve out of order, producing
+replies in the wrong sequence and corrupting server-side history.
+
+### Known limitations (continued)
+
+**L10 — The prompt's LIMIT rule is not always followed.**
+Rule 3 tells the model to omit `LIMIT` when the question asks for a single
+aggregate. Observed live: "How many orders were cancelled?" produced
+`SELECT COUNT(id) FROM orders WHERE status = 'cancelled' LIMIT 100`. Harmless
+here — a limit cannot affect a one-row aggregate — but it is a concrete example
+of prompt instructions being probabilistic rather than binding (D2). Anything
+that must hold is enforced in code.
+
+### Process notes (continued)
+
+**P7 — Colab cannot render the app in an inline iframe.**
+`IPython.display.IFrame` pointing at `127.0.0.1:8000` fails with a connection
+error. Notebook output is rendered in a sandboxed iframe from a different
+origin, so `127.0.0.1` there refers to the *user's* machine, not the Colab VM.
+The frontend was therefore verified by asserting on content types and response
+bodies over loopback rather than visually. First visual rendering happens
+against the deployed URL.
+
+### Verified test evidence (continued)
+
+Phase 6, after a runtime restart (required because `main.py` mounts the static
+directory conditionally at import time, and `frontend/` was empty when the
+previous server process started):
+
+- `GET /` -> 200 `text/html`, serving `index.html` rather than the placeholder JSON
+- `GET /static/style.css` -> 200 `text/css`
+- `GET /static/app.js` -> 200 `text/javascript`
+- `POST /chat` "How many orders were cancelled?" -> `2 orders were cancelled`,
+  matching the two cancelled orders planted in the seed data
