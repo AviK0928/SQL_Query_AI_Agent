@@ -4,6 +4,7 @@ Ask questions about an e-commerce database in plain English. Get an answer, the
 SQL that produced it, and the rows it returned.
 
 **Live demo:** https://sql-query-ai-agent.onrender.com
+**Video walkthrough:** https://youtu.be/bXCRQufnvPY
 
 > Hosted on a free tier that sleeps after 15 minutes idle. The first request may
 > take 30-60 seconds to wake the server.
@@ -182,4 +183,8 @@ in [`DISCOVERIES.md`](DISCOVERIES.md).
 
 ## Demo video
 
-_To be added._
+[Watch the demo](https://youtu.be/bXCRQufnvPY?si=Av9dtlzokdHMVncn) (3 minutes)
+
+Covers a query and its generated SQL, a follow-up question using conversation
+context, both kinds of refusal, and the database protections with the test that
+proves them.
