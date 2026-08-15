@@ -185,7 +185,7 @@ in [`DISCOVERIES.md`](DISCOVERIES.md).
 
 ## Demo video
 
-[Watch the demo](https://youtu.be/bXCRQufnvPY?si=Av9dtlzokdHMVncn) (3 minutes)
+[Watch the demo](https://youtu.be/bXCRQufnvPY?si=Av9dtlzokdHMVncn) (5 minutes)
 
 Covers a query and its generated SQL, a follow-up question using conversation
 context, both kinds of refusal, and the database protections with the test that
