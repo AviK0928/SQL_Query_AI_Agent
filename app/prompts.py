@@ -109,7 +109,13 @@ def build_answer_messages(question, columns, rows, truncated=False):
         header = " | ".join(columns)
         body = "\n".join(" | ".join(str(v) for v in row) for row in rows[:20])
         table = f"{header}\n{body}"
-        if truncated:
+        if len(rows) > 20:
+            table += (
+                f"\n(showing the first 20 of {len(rows)} rows; do not describe these "
+                "as the highest, lowest or total unless the query itself ordered or "
+                "aggregated them)"
+            )
+        elif truncated:
             table += "\n(results were truncated)"
     else:
         table = "(no rows returned)"

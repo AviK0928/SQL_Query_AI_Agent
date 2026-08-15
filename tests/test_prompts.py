@@ -81,6 +81,19 @@ def test_answer_messages_flag_truncation():
     assert "truncated" in m[-1]["content"]
 
 
+def test_answer_messages_warn_when_rows_are_hidden():
+    """A partial view must be labelled, or the model reports the max of what it sees."""
+    m = build_answer_messages("latest expenditures", ["id"], [[i] for i in range(30)])
+    content = m[-1]["content"]
+    assert "first 20 of 30" in content
+    assert "highest" in content
+
+
+def test_answer_messages_no_warning_when_all_rows_shown():
+    m = build_answer_messages("a few rows", ["id"], [[i] for i in range(5)])
+    assert "showing the first" not in m[-1]["content"]
+
+
 def test_answer_messages_cap_rows_sent_to_llm():
     m = build_answer_messages("List all", ["id"], [[i] for i in range(200)])
     assert "199" not in m[-1]["content"], "should send at most 20 rows"
