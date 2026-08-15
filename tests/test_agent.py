@@ -99,6 +99,21 @@ def test_out_of_scope_skips_the_database(sql_seen):
     assert fake.call_count == 1, "no answer-formatting call needed"
 
 
+def test_read_only_request_gets_a_read_only_message(sql_seen):
+    """Write requests are on-topic but forbidden, so the reply must say so."""
+    fake = FakeLLM("READ_ONLY")
+    agent.set_llm(fake)
+
+    result = agent.ask("delete the most expensive order")
+
+    assert result["out_of_scope"] is True
+    assert result["sql"] is None
+    assert "only read" in result["answer"]
+    assert "e-commerce database" not in result["answer"], "wrong message: that is the off-topic one"
+    assert sql_seen == []
+    assert fake.call_count == 1
+
+
 # --- 3. retry succeeds --------------------------------------------------
 
 def test_retry_after_bad_column_succeeds():

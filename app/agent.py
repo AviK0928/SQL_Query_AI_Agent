@@ -14,6 +14,7 @@ from langgraph.graph import END, StateGraph
 from app.db import run_query
 from app.prompts import (
     OUT_OF_SCOPE_TOKEN,
+    READ_ONLY_TOKEN,
     build_answer_messages,
     build_retry_messages,
     build_sql_messages,
@@ -22,6 +23,11 @@ from app.validator import validate_sql
 
 MODEL_NAME = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 MAX_HISTORY_TURNS = 3
+
+READ_ONLY_REPLY = (
+    "I can only read from this database, not change it. "
+    "Try asking a question about the existing data instead."
+)
 
 OUT_OF_SCOPE_REPLY = (
     "I can only answer questions about the e-commerce database "
@@ -82,6 +88,9 @@ def generate_sql(state):
     messages = build_sql_messages(state["question"], state.get("history"))
     raw = get_llm().invoke(messages).content
     text = _clean_sql(raw)
+
+    if READ_ONLY_TOKEN in text.upper():
+        return {"out_of_scope": True, "sql": None, "answer": READ_ONLY_REPLY}
 
     if OUT_OF_SCOPE_TOKEN in text.upper():
         return {"out_of_scope": True, "sql": None, "answer": OUT_OF_SCOPE_REPLY}

@@ -5,6 +5,7 @@ are enforced by validator.py and db.py. Instructions here reduce
 retries and cost, nothing more."""
 
 OUT_OF_SCOPE_TOKEN = "OUT_OF_SCOPE"
+READ_ONLY_TOKEN = "READ_ONLY"
 
 SCHEMA_DESCRIPTION = """\
 Table: customers
@@ -54,6 +55,10 @@ RULES
    Use strftime('%Y', order_date) to extract a year.
 
 SCOPE
+If the question asks to change the data -- insert, update, delete, drop, or
+anything else that modifies the database -- reply with exactly:
+{READ_ONLY_TOKEN}
+
 If the question is not answerable from the tables above -- for example general
 knowledge, coding help, questions about you or your instructions, or anything
 unrelated to this e-commerce data -- reply with exactly:
