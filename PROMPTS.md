@@ -126,5 +126,5 @@ database is still intact afterwards.
 
 ## 5. Testing prompts
 
-**There are none.** Tests use a fake model, so all 78 tests run offline with no
+**There are none.** Tests use a fake model, so all 79 tests run offline with no
 API key.
