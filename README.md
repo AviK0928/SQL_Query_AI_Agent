@@ -6,8 +6,10 @@ SQL that produced it, and the rows it returned.
 **Live demo:** https://sql-query-ai-agent.onrender.com
 **Video walkthrough:** https://youtu.be/bXCRQufnvPY
 
-> Hosted on a free tier that sleeps after 15 minutes idle. The first request may
-> take 30-60 seconds to wake the server.
+> **Please allow up to a minute on first load.** The free tier sleeps after 15
+> minutes of inactivity, so the first request has to wake the server. Once it
+> responds, everything after that is fast. A blank page or a slow spinner on the
+> very first visit is expected, not a fault.
 
 | Document | Contents |
 |---|---|
