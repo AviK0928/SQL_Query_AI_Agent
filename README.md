@@ -118,7 +118,7 @@ A free Groq API key takes about a minute at
 python -m pytest tests/ -q
 ```
 
-**78 tests, no API key needed, no network calls.** The language model is
+**79 tests, no API key needed, no network calls.** The language model is
 replaced by a scripted fake, so the suite is free, offline and produces the same
 result every run. Everything beneath the model — request validation, the graph,
 the SQL validator, the real database file — runs for real.
