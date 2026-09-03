@@ -3,7 +3,7 @@
 Ask questions about an e-commerce database in plain English. Get an answer, the
 SQL that produced it, and the rows it returned.
 
-**Live demo:** [https://sql-query-ai-agent.onrender.com](https://sql-query-agent-zxsx.onrender.com/)
+**Live demo:** https://sql-query-agent-zxsx.onrender.com/
 **Video walkthrough:** https://youtu.be/bXCRQufnvPY
 
 > **Please allow up to a minute on first load.** The free tier sleeps after 15
