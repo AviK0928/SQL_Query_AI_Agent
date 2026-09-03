@@ -179,6 +179,11 @@ The SQLite file is committed, so there is no database to provision.
   the model
 - **A generated query can be valid, safe, and still answer the wrong question.**
   Nothing in the system can detect this, which is why the SQL is always shown
+- **Update (3 Sep 2026)** — Groq decommissioned `llama-3.3-70b-versatile`
+  on 16 Aug 2026. Migrated to `openai/gpt-oss-120b`. Cost: one environment
+  variable on the host plus a one-line default change. The regression query
+  (top 3 customers by revenue) returned identical figures under the new model,
+  and the `unit_price` / cancelled-order rules in the prompt held.
 
 Each of these is explained, with the conditions under which it actually bites,
 in [`DISCOVERIES.md`](DISCOVERIES.md).
