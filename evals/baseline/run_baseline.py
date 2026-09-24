@@ -14,6 +14,10 @@ Properties:
 
 Run from the repo root:
     GROQ_MODEL=<model-id> python -m evals.baseline.run_baseline
+
+Since Phase 1 the agent is built explicitly (Agent(settings, llm=...)) instead
+of through module globals. Behaviour under test is unchanged, so results stay
+comparable with the Phase 0 file (same prompt hash, same schema hash).
 """
 
 from __future__ import annotations
@@ -21,7 +25,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import sqlite3
 import subprocess
@@ -31,9 +34,9 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-import app.agent as agent
 from app import prompts
-from app.db import DB_PATH, MAX_ROWS
+from app.agent import Agent
+from app.config import ConfigError, load_settings
 
 HERE = Path(__file__).resolve().parent
 QUESTIONS = HERE / "questions_v0.jsonl"
@@ -61,8 +64,8 @@ def prompt_hash() -> str:
     )
 
 
-def schema_hash() -> str:
-    con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+def schema_hash(db_path: Path) -> str:
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         ddl = [r[0] or "" for r in con.execute(
             "SELECT sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
@@ -122,8 +125,8 @@ def _norm(v):
     return v
 
 
-def reference_rows(sql: str) -> list[tuple]:
-    con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+def reference_rows(sql: str, db_path: Path) -> list[tuple]:
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         return [tuple(_norm(v) for v in r) for r in con.execute(sql).fetchall()]
     finally:
@@ -159,13 +162,13 @@ def truncation_pass(checks: dict) -> bool:
     return checks["truncated_flag"] and checks["discloses_truncation"]
 
 
-def evaluate(item: dict, result: dict) -> dict:
+def evaluate(item: dict, result: dict, db_path: Path) -> dict:
     kind = item["kind"]
     answer = result.get("answer", "")
     checks: dict = {}
 
     if kind in ("sql", "empty", "truncation"):
-        ref = reference_rows(item["reference_sql"])
+        ref = reference_rows(item["reference_sql"], db_path)
         got = result.get("rows", [])
         checks["ref_row_count"] = len(ref)
         checks["got_row_count"] = len(got)
@@ -214,14 +217,15 @@ def estimate(items: list[dict]) -> tuple[int, int]:
     return max_calls, max_calls * per_call_tokens
 
 
-def run_item(item: dict, llm: RecordingLLM) -> dict:
+def run_item(item: dict, bot: Agent, llm: RecordingLLM) -> dict:
     history: list[dict] = []
     result: dict = {}
     first_call = len(llm.calls)
     for question in item["turns"]:
-        result = agent.ask(question, history)
+        result = bot.ask(question, history)
         if result["sql"] and not result["error"]:  # mirrors app/main.py
-            history = (history + [{"question": question, "sql": result["sql"]}])[-agent.MAX_HISTORY_TURNS:]
+            turns = history + [{"question": question, "sql": result["sql"]}]
+            history = turns[-bot.settings.max_history_turns :]
     calls = llm.calls[first_call:]
     return {
         "answer": result.get("answer"),
@@ -232,7 +236,7 @@ def run_item(item: dict, llm: RecordingLLM) -> dict:
         "truncated": result.get("truncated", False),
         "error": result.get("error"),
         "out_of_scope": result.get("out_of_scope", False),
-        "checks": evaluate(item, result),
+        "checks": evaluate(item, result, bot.settings.db_path),
         "llm_calls": len(calls),
         "input_tokens": sum(c["input_tokens"] or 0 for c in calls),
         "output_tokens": sum(c["output_tokens"] or 0 for c in calls),
@@ -255,10 +259,12 @@ def main() -> int:
         summarize(Path(args.summary_only))
         return 0
 
-    model = os.environ.get("GROQ_MODEL")
-    if not model or not os.environ.get("GROQ_API_KEY"):
-        print("GROQ_MODEL and GROQ_API_KEY must both be set. No default model is assumed.")
+    try:
+        settings = load_settings()
+    except ConfigError as exc:
+        print(exc)  # names the missing variables, never their values
         return 2
+    model = settings.groq_model
 
     items = load_items()
     if args.only:
@@ -272,7 +278,8 @@ def main() -> int:
 
     calls, tokens = estimate(todo)
     print(f"Model: {model}  temperature={TEMPERATURE}  prompt={prompt_hash()}  "
-          f"schema={schema_hash()}  commit={git_commit()}  row_cap={MAX_ROWS}")
+          f"schema={schema_hash(settings.db_path)}  commit={git_commit()}  "
+          f"row_cap={settings.max_rows}")
     print(f"Items: {len(todo)} to run, {len(done)} already done -> {out_path}")
     print(f"Worst-case estimate: {calls} requests, ~{tokens:,} tokens, "
           f">= {calls * args.min_interval / 60:.1f} min at {args.min_interval}s/call")
@@ -285,20 +292,21 @@ def main() -> int:
 
     from langchain_groq import ChatGroq
     llm = RecordingLLM(
-        ChatGroq(model=model, temperature=TEMPERATURE, timeout=60, max_retries=2),
+        ChatGroq(model=model, temperature=TEMPERATURE, timeout=60, max_retries=2,
+                 api_key=settings.groq_api_key),
         min_interval_s=args.min_interval,
     )
-    agent.set_llm(llm)
+    bot = Agent(settings, llm=llm)
 
     meta = {"model": model, "temperature": TEMPERATURE, "prompt_hash": prompt_hash(),
-            "schema_hash": schema_hash(), "commit": git_commit()}
+            "schema_hash": schema_hash(settings.db_path), "commit": git_commit()}
 
     for item in todo:
         record = {"id": item["id"], "tier": item["tier"], "kind": item["kind"],
                   "turns": item["turns"], **meta,
                   "ran_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         try:
-            record.update(run_item(item, llm), status="ok")
+            record.update(run_item(item, bot, llm), status="ok")
         except Exception as exc:  # recorded, never swallowed silently
             record.update(status="error", exception=type(exc).__name__,
                           message=str(exc)[:300], rate_limited=is_rate_limit(exc))

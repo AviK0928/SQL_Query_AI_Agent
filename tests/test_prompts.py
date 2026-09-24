@@ -8,7 +8,7 @@ longer exists, and the failure looks like a bad model rather than stale config.
 
 import pytest
 
-from app.db import get_schema
+from app.db import Database
 from app.prompts import (
     SCHEMA_DESCRIPTION,
     SQL_SYSTEM_PROMPT,
@@ -19,9 +19,14 @@ from app.prompts import (
 )
 
 
-def test_prompt_schema_matches_database():
+@pytest.fixture
+def schema(test_settings):
+    return Database.from_settings(test_settings).get_schema()
+
+
+def test_prompt_schema_matches_database(schema):
     """Every real table and column must be described in the prompt."""
-    actual = get_schema()
+    actual = schema
     missing = []
 
     for table in actual["tables"]:
@@ -35,9 +40,9 @@ def test_prompt_schema_matches_database():
     assert not missing, f"prompts.py is out of sync with the database: {missing}"
 
 
-def test_prompt_describes_no_phantom_tables():
+def test_prompt_describes_no_phantom_tables(schema):
     """The prompt must not mention tables that do not exist."""
-    real = {t["name"] for t in get_schema()["tables"]}
+    real = {t["name"] for t in schema["tables"]}
     described = {
         line.split("Table:")[1].strip()
         for line in SCHEMA_DESCRIPTION.splitlines()
