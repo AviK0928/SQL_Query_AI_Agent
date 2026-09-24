@@ -188,6 +188,21 @@ so it can be changed on the deployment platform without a code change.
 Availability was verified by querying the provider's model list rather than
 trusting documentation.
 
+### Model output contains non-breaking spaces
+
+The Phase 2 live check reported a failure on a correct answer. The reply named
+all three Delhi customers, but the check compared plain strings, and
+`openai/gpt-oss-120b` often writes non-breaking spaces (such as U+00A0 and
+U+202F) where an ordinary space is expected. "Kabir Singh" on screen was not
+equal to "Kabir Singh" in the check.
+
+The rule since: any code that compares model text normalises it first, with
+Unicode NFKC followed by whitespace collapsing. NFKC maps both characters to an
+ordinary space. This matters most for the Phase 5 `check_answer` node and the
+Phase 6 evals, whose number-extraction checks must also survive Indian digit
+grouping (`1,83,530`) and non-breaking thousands separators. Normalisation
+applies only inside checks; the answer shown to the user is left untouched.
+
 ---
 
 ## Database and SQL
