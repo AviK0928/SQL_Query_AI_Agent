@@ -27,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest==9.0.3",               # 8.4.2 had PYSEC-2026-1845 (pip-audit, S5)
+    "pytest==9.1.1",               # 8.4.2 had PYSEC-2026-1845 (pip-audit, S5)
     "httpx==0.28.1",              # FastAPI TestClient transport
     "pytest-cov==7.1.0",
     "ruff==0.16.8",
