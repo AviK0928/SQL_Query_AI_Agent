@@ -1,12 +1,5 @@
-# Pinned to the exact versions verified working on 15 August 2026.
-# Loose constraints (>=) were used during development; they were replaced
-# before deployment so the build is reproducible. LangGraph in particular
-# moved from 0.2 to 1.x during this project.
-
-fastapi==0.139.0
-uvicorn[standard]==0.51.0
-python-dotenv==1.2.2
-langgraph==1.2.9
-langchain-groq==1.1.3
-pytest==8.4.2
-httpx==0.28.1
+# Render's build command is `pip install -r requirements.txt`. This file only
+# delegates to pyproject.toml, which is the single source of dependencies, so
+# the build command did not have to change (D-entry in Phase 1).
+# Editable, so app/ keeps resolving database/ and frontend/ from the repo root.
+-e .
