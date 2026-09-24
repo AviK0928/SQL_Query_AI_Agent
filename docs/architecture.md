@@ -6,7 +6,7 @@
 flowchart TD
     U[Browser<br/>HTML + CSS + JS] -->|POST /chat| F[FastAPI<br/>app/main.py]
     F --> A[LangGraph agent<br/>app/agent.py]
-    A -->|question + schema| L[Groq API<br/>llama-3.3-70b]
+    A -->|question + schema| L[Groq API<br/>model from GROQ_MODEL]
     L -->|generated SQL| A
     A --> V[SQL validator<br/>app/validator.py]
     V --> D[SQLite<br/>read-only<br/>app/db.py]
@@ -23,11 +23,12 @@ no separate frontend deployment and no CORS configuration.
 | File | Responsibility |
 |---|---|
 | `frontend/` | Chat UI. Plain HTML, CSS and JavaScript — no framework, no build step. |
-| `app/main.py` | Three endpoints, request validation, session storage. |
-| `app/agent.py` | The LangGraph flow. Calls the model, the validator and the database. |
+| `app/config.py` | Typed settings, validated once at startup (D14). |
+| `app/main.py` | `create_app()`: wires settings, agent, database and sessions; three endpoints and request validation (D16). |
+| `app/agent.py` | `Agent`: the LangGraph flow. Calls the model, the validator and the database, all injected. |
 | `app/prompts.py` | Every string sent to the model. |
 | `app/validator.py` | Checks generated SQL before it runs. |
-| `app/db.py` | Read-only database access. |
+| `app/db.py` | `Database`: read-only access with row cap and timeout from settings. |
 | `database/` | Schema, seed data, and the SQLite file (committed to the repo). |
 
 ## Request flow
