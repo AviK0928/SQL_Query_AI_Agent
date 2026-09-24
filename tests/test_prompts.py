@@ -10,12 +10,12 @@ import pytest
 
 from app.db import Database
 from app.prompts import (
+    OUT_OF_SCOPE_TOKEN,
     SCHEMA_DESCRIPTION,
     SQL_SYSTEM_PROMPT,
-    OUT_OF_SCOPE_TOKEN,
-    build_sql_messages,
-    build_retry_messages,
     build_answer_messages,
+    build_retry_messages,
+    build_sql_messages,
 )
 
 
@@ -53,6 +53,7 @@ def test_prompt_describes_no_phantom_tables(schema):
 
 # --- message assembly ---------------------------------------------------
 
+
 def test_sql_messages_without_history():
     m = build_sql_messages("Show all customers")
     assert [x["role"] for x in m] == ["system", "user"]
@@ -71,7 +72,9 @@ def test_sql_messages_replay_history_in_order():
 
 
 def test_retry_messages_include_the_error():
-    m = build_retry_messages("Show revenue", "SELECT revenue FROM customers", "no such column: revenue")
+    m = build_retry_messages(
+        "Show revenue", "SELECT revenue FROM customers", "no such column: revenue"
+    )
     assert "no such column: revenue" in m[-1]["content"]
     assert m[2]["content"] == "SELECT revenue FROM customers"
 
@@ -106,11 +109,15 @@ def test_answer_messages_cap_rows_sent_to_llm():
 
 # --- prompt content guarantees ------------------------------------------
 
-@pytest.mark.parametrize("rule", [
-    "unit_price",        # D1: use price actually paid
-    "cancelled",         # exclude cancelled orders from totals
-    "LIMIT",             # cap result size
-    OUT_OF_SCOPE_TOKEN,  # scope + injection handling
-])
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        "unit_price",  # D1: use price actually paid
+        "cancelled",  # exclude cancelled orders from totals
+        "LIMIT",  # cap result size
+        OUT_OF_SCOPE_TOKEN,  # scope + injection handling
+    ],
+)
 def test_sql_prompt_states_key_rules(rule):
     assert rule in SQL_SYSTEM_PROMPT
