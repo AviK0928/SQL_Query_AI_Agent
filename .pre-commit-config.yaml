@@ -1,0 +1,44 @@
+# Git hooks. Install once per clone: `pre-commit install` (dev.ipynb Cell 8).
+# Run everything by hand: `pre-commit run --all-files`.
+#
+# Revisions are pinned. ruff's rev must equal the ruff pin in pyproject.toml so
+# the hook and CI lint identically; the other revs are set by
+# `pre-commit autoupdate --repo <url>` and recorded in the README (P8).
+
+exclude: ^(evals/baseline/results/|database/ecommerce\.db$)
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.8
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+
+  # mypy runs from the project environment (not an isolated hook env) so it
+  # sees the installed dependencies and the pinned mypy version.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (project env)
+        entry: mypy app
+        language: system
+        types: [python]
+        pass_filenames: false

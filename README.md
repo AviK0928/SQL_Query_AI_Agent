@@ -145,6 +145,15 @@ the test even if the app swallowed the error (T1). Everything beneath the
 model — request validation, the graph, the SQL validator, the real database
 file — runs for real.
 
+The full quality gate, the same checks CI runs:
+
+```bash
+ruff check . && ruff format --check . && mypy app && pytest -q --cov
+```
+
+Git hooks run ruff, gitleaks, mypy and basic file checks on every commit
+(P8). Install them once per clone with `pre-commit install`.
+
 ## Using it
 
 Ask anything answerable from four tables: customers, products, orders,
@@ -256,7 +265,8 @@ recovered and are listed as such rather than invented.
 | Tag | Record | Where |
 |---|---|---|
 | T1 | The default test run is offline by construction. An autouse guard removes every setting from the environment and blocks and records non-loopback DNS and connections; any recorded attempt fails the test at teardown, even if the app swallowed the error (A-04). | `tests/conftest.py`, `tests/test_offline_guard.py` |
-| T2 | 106 tests collected and passing (`pytest --collect-only`), commit `e79f31c`, 24 Sep 2026. Up from 79 at `f6e44c0`. | `tests/` |
+| T2 | 106 tests collected and passing (`pytest --collect-only`), 24 Sep 2026: first at `e79f31c`, re-confirmed after the Phase 1 lint and format pass. Up from 79 at `f6e44c0`. | `tests/` |
+| T3 | The Phase 1 lint and format pass did not change any test. Proven by comparing the syntax tree of all 146 `assert` statements before and after `ruff format` and `ruff check --fix`, and the full syntax tree of each hand-edited file (identical). | Phase 1 notebook cells P1-13, P1-15 |
 
 ### Data handling
 
@@ -269,6 +279,7 @@ None recorded yet (Phase 9).
 | P1–P5 | Not recoverable (pre-refactor, never cited). | — |
 | P6 | The `frontend/` static mount is conditional, because git does not track empty directories and the folder was absent from fresh clones before the frontend existed. | `app/main.py` |
 | P7 | Development runs in Google Colab inside a project venv at `/content/venv`, isolated from Colab's preinstalled packages (A-23). Colab's Python lacks `ensurepip`, so the notebook falls back to `virtualenv`. A VM-recycle recovery run from an empty `/content` was completed on 24 Sep 2026. | `notebooks/dev.ipynb` |
+| P8 | Git hooks via pre-commit: file hygiene checks (`pre-commit-hooks v6.0.0`), ruff lint and format (`v0.16.8`, equal to the `pyproject.toml` pin), gitleaks secret scanning (`v8.30.0`), and mypy from the project environment. Revs pinned with `pre-commit autoupdate --repo`, 24 Sep 2026. Markdown is excluded from ruff so docs keep their author's formatting. | `.pre-commit-config.yaml`, `pyproject.toml` |
 
 ### Verification
 

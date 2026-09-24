@@ -31,7 +31,7 @@ import subprocess
 import sys
 import time
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app import prompts
@@ -47,12 +47,11 @@ MAX_ROWS_IN_FILE = 50
 DISCLOSES_TRUNCATION = re.compile(
     r"\b(first|only|truncat\w*|partial|limit\w*|showing|subset|more rows|not all)\b", re.I
 )
-DISCLOSES_EMPTY = re.compile(
-    r"\b(no|none|not find|couldn't find|could not find|zero|0)\b", re.I
-)
+DISCLOSES_EMPTY = re.compile(r"\b(no|none|not find|couldn't find|could not find|zero|0)\b", re.I)
 
 
 # --- reproducibility metadata -------------------------------------------
+
 
 def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
@@ -67,21 +66,26 @@ def prompt_hash() -> str:
 def schema_hash(db_path: Path) -> str:
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
-        ddl = [r[0] or "" for r in con.execute(
-            "SELECT sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
-        )]
+        ddl = [
+            r[0] or ""
+            for r in con.execute(
+                "SELECT sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
+            )
+        ]
     finally:
         con.close()
     return _sha("\n".join(ddl))
 
 
 def git_commit() -> str:
-    out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                         capture_output=True, text=True, check=False)
+    out = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False
+    )
     return out.stdout.strip() if out.returncode == 0 else "unknown"
 
 
 # --- live LLM wrapper ----------------------------------------------------
+
 
 class RecordingLLM:
     """Wraps the real client: enforces a call interval, records usage and latency."""
@@ -102,12 +106,16 @@ class RecordingLLM:
         finally:
             self._last = time.monotonic()
         usage = getattr(response, "usage_metadata", None) or {}
-        self.calls.append({
-            "latency_s": round(self._last - start, 3),
-            "input_tokens": usage.get("input_tokens"),
-            "output_tokens": usage.get("output_tokens"),
-            "model_reported": (getattr(response, "response_metadata", {}) or {}).get("model_name"),
-        })
+        self.calls.append(
+            {
+                "latency_s": round(self._last - start, 3),
+                "input_tokens": usage.get("input_tokens"),
+                "output_tokens": usage.get("output_tokens"),
+                "model_reported": (getattr(response, "response_metadata", {}) or {}).get(
+                    "model_name"
+                ),
+            }
+        )
         return response
 
 
@@ -116,6 +124,7 @@ def is_rate_limit(exc: BaseException) -> bool:
 
 
 # --- deterministic checks ------------------------------------------------
+
 
 def _norm(v):
     if isinstance(v, (int, float)) and not isinstance(v, bool):
@@ -199,6 +208,7 @@ def evaluate(item: dict, result: dict, db_path: Path) -> dict:
 
 # --- runner --------------------------------------------------------------
 
+
 def load_items() -> list[dict]:
     return [json.loads(line) for line in QUESTIONS.read_text().splitlines() if line.strip()]
 
@@ -206,8 +216,11 @@ def load_items() -> list[dict]:
 def load_done(path: Path) -> set[str]:
     if not path.exists():
         return set()
-    return {json.loads(l)["id"] for l in path.read_text().splitlines()
-            if l.strip() and json.loads(l).get("status") == "ok"}
+    return {
+        json.loads(line)["id"]
+        for line in path.read_text().splitlines()
+        if line.strip() and json.loads(line).get("status") == "ok"
+    }
 
 
 def estimate(items: list[dict]) -> tuple[int, int]:
@@ -247,12 +260,19 @@ def run_item(item: dict, bot: Agent, llm: RecordingLLM) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--min-interval", type=float, default=4.0,
-                        help="Seconds between LLM calls. Set from your model's RPM limit.")
+    parser.add_argument(
+        "--min-interval",
+        type=float,
+        default=4.0,
+        help="Seconds between LLM calls. Set from your model's RPM limit.",
+    )
     parser.add_argument("--only", nargs="*", help="Run only these item ids.")
     parser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt.")
-    parser.add_argument("--summary-only", metavar="JSONL",
-                        help="Re-grade and summarise an existing results file. No API calls.")
+    parser.add_argument(
+        "--summary-only",
+        metavar="JSONL",
+        help="Re-grade and summarise an existing results file. No API calls.",
+    )
     args = parser.parse_args()
 
     if args.summary_only:
@@ -277,12 +297,16 @@ def main() -> int:
     todo = [i for i in items if i["id"] not in done]
 
     calls, tokens = estimate(todo)
-    print(f"Model: {model}  temperature={TEMPERATURE}  prompt={prompt_hash()}  "
-          f"schema={schema_hash(settings.db_path)}  commit={git_commit()}  "
-          f"row_cap={settings.max_rows}")
+    print(
+        f"Model: {model}  temperature={TEMPERATURE}  prompt={prompt_hash()}  "
+        f"schema={schema_hash(settings.db_path)}  commit={git_commit()}  "
+        f"row_cap={settings.max_rows}"
+    )
     print(f"Items: {len(todo)} to run, {len(done)} already done -> {out_path}")
-    print(f"Worst-case estimate: {calls} requests, ~{tokens:,} tokens, "
-          f">= {calls * args.min_interval / 60:.1f} min at {args.min_interval}s/call")
+    print(
+        f"Worst-case estimate: {calls} requests, ~{tokens:,} tokens, "
+        f">= {calls * args.min_interval / 60:.1f} min at {args.min_interval}s/call"
+    )
     print("Compare against your remaining daily quota in the Groq console.")
     if not todo:
         return 0
@@ -291,25 +315,45 @@ def main() -> int:
         return 1
 
     from langchain_groq import ChatGroq
+
     llm = RecordingLLM(
-        ChatGroq(model=model, temperature=TEMPERATURE, timeout=60, max_retries=2,
-                 api_key=settings.groq_api_key),
+        ChatGroq(
+            model=model,
+            temperature=TEMPERATURE,
+            timeout=60,
+            max_retries=2,
+            api_key=settings.groq_api_key,
+        ),
         min_interval_s=args.min_interval,
     )
     bot = Agent(settings, llm=llm)
 
-    meta = {"model": model, "temperature": TEMPERATURE, "prompt_hash": prompt_hash(),
-            "schema_hash": schema_hash(settings.db_path), "commit": git_commit()}
+    meta = {
+        "model": model,
+        "temperature": TEMPERATURE,
+        "prompt_hash": prompt_hash(),
+        "schema_hash": schema_hash(settings.db_path),
+        "commit": git_commit(),
+    }
 
     for item in todo:
-        record = {"id": item["id"], "tier": item["tier"], "kind": item["kind"],
-                  "turns": item["turns"], **meta,
-                  "ran_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        record = {
+            "id": item["id"],
+            "tier": item["tier"],
+            "kind": item["kind"],
+            "turns": item["turns"],
+            **meta,
+            "ran_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
         try:
             record.update(run_item(item, bot, llm), status="ok")
         except Exception as exc:  # recorded, never swallowed silently
-            record.update(status="error", exception=type(exc).__name__,
-                          message=str(exc)[:300], rate_limited=is_rate_limit(exc))
+            record.update(
+                status="error",
+                exception=type(exc).__name__,
+                message=str(exc)[:300],
+                rate_limited=is_rate_limit(exc),
+            )
         with out_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
         verdict = record.get("checks", {}).get("pass") if record["status"] == "ok" else "ERROR"
@@ -323,7 +367,7 @@ def main() -> int:
 
 
 def summarize(path: Path) -> None:
-    rows = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     latest = {r["id"]: r for r in rows}  # last attempt per item wins
     ok = [r for r in latest.values() if r["status"] == "ok"]
     for r in ok:  # apply the current truncation rule to stored checks
@@ -334,10 +378,14 @@ def summarize(path: Path) -> None:
     for r in sorted(latest.values(), key=lambda x: x["id"]):
         verdict = r["checks"].get("pass") if r["status"] == "ok" else "ERROR"
         print(f"  {r['id']} {r['tier']:<4} {r['kind']:<20} pass={verdict}")
-    print(f"\nSummary: {passed}/{len(graded)} graded items passed; "
-          f"{len(latest) - len(ok)} errored; {len(ok) - len(graded)} need manual review")
-    print(f"Tokens in/out: {sum(r['input_tokens'] for r in ok):,} / "
-          f"{sum(r['output_tokens'] for r in ok):,}   LLM calls: {sum(r['llm_calls'] for r in ok)}")
+    print(
+        f"\nSummary: {passed}/{len(graded)} graded items passed; "
+        f"{len(latest) - len(ok)} errored; {len(ok) - len(graded)} need manual review"
+    )
+    print(
+        f"Tokens in/out: {sum(r['input_tokens'] for r in ok):,} / "
+        f"{sum(r['output_tokens'] for r in ok):,}   LLM calls: {sum(r['llm_calls'] for r in ok)}"
+    )
     lat = sorted(r["latency_s"] for r in ok)
     if lat:
         print(f"Per-item LLM latency p50={lat[len(lat) // 2]}s max={lat[-1]}s")

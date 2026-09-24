@@ -39,6 +39,7 @@ def sql_seen(monkeypatch):
 
 # --- 1. happy path ------------------------------------------------------
 
+
 def test_happy_path_generates_sql_and_answers(make_agent):
     fake = FakeLLM(
         "SELECT name, city FROM customers LIMIT 5",
@@ -58,6 +59,7 @@ def test_happy_path_generates_sql_and_answers(make_agent):
 
 
 # --- 2. out of scope ----------------------------------------------------
+
 
 def test_out_of_scope_skips_the_database(make_agent, sql_seen):
     fake = FakeLLM("OUT_OF_SCOPE")
@@ -90,10 +92,11 @@ def test_read_only_request_gets_a_read_only_message(make_agent, sql_seen):
 
 # --- 3. retry succeeds --------------------------------------------------
 
+
 def test_retry_after_bad_column_succeeds(make_agent):
     fake = FakeLLM(
-        "SELECT revenue FROM customers",          # valid shape, column does not exist
-        "SELECT name FROM customers LIMIT 3",     # corrected
+        "SELECT revenue FROM customers",  # valid shape, column does not exist
+        "SELECT name FROM customers LIMIT 3",  # corrected
         "Three customers were found.",
     )
     bot = make_agent(fake)
@@ -121,6 +124,7 @@ def test_retry_receives_the_database_error(make_agent):
 
 # --- 4. retry exhausted -------------------------------------------------
 
+
 def test_retry_exhausted_returns_error_without_a_third_call(make_agent):
     fake = FakeLLM(
         "SELECT revenue FROM customers",
@@ -136,6 +140,7 @@ def test_retry_exhausted_returns_error_without_a_third_call(make_agent):
 
 
 # --- 5. dangerous SQL ---------------------------------------------------
+
 
 def test_dangerous_sql_never_reaches_the_database(make_agent, sql_seen):
     fake = FakeLLM(
@@ -166,11 +171,15 @@ def test_stacked_statements_are_rejected_by_the_validator(make_agent, sql_seen):
 
 # --- 6. markdown fences -------------------------------------------------
 
-@pytest.mark.parametrize("raw", [
-    "```sql\nSELECT name FROM customers LIMIT 2\n```",
-    "```\nSELECT name FROM customers LIMIT 2\n```",
-    "  SELECT name FROM customers LIMIT 2  ",
-])
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "```sql\nSELECT name FROM customers LIMIT 2\n```",
+        "```\nSELECT name FROM customers LIMIT 2\n```",
+        "  SELECT name FROM customers LIMIT 2  ",
+    ],
+)
 def test_markdown_fences_and_whitespace_are_stripped(make_agent, raw):
     fake = FakeLLM(raw, "Two customers.")
     bot = make_agent(fake)
@@ -183,6 +192,7 @@ def test_markdown_fences_and_whitespace_are_stripped(make_agent, raw):
 
 # --- 7. conversation history --------------------------------------------
 
+
 def test_history_is_replayed_to_the_model(make_agent):
     fake = FakeLLM(
         "SELECT name FROM customers WHERE city = 'Pune' LIMIT 5",
@@ -190,8 +200,12 @@ def test_history_is_replayed_to_the_model(make_agent):
     )
     bot = make_agent(fake)
 
-    history = [{"question": "customers in Mumbai",
-                "sql": "SELECT name FROM customers WHERE city = 'Mumbai'"}]
+    history = [
+        {
+            "question": "customers in Mumbai",
+            "sql": "SELECT name FROM customers WHERE city = 'Mumbai'",
+        }
+    ]
     bot.ask("and Pune?", history)
 
     roles = [m["role"] for m in fake.calls[0]]

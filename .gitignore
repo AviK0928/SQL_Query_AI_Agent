@@ -22,3 +22,10 @@ env/
 # Notebooks / OS noise
 .ipynb_checkpoints/
 .DS_Store
+
+# Tool caches and reports
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/

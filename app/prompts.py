@@ -88,10 +88,11 @@ Rules:
 - If the results were truncated, mention that only the first rows are shown.
 - Do not invent numbers that are not in the results."""
 
+
 def build_sql_messages(question, history=None):
     """Messages for the initial SQL generation call."""
     messages = [{"role": "system", "content": SQL_SYSTEM_PROMPT}]
-    for turn in (history or []):
+    for turn in history or []:
         messages.append({"role": "user", "content": turn["question"]})
         messages.append({"role": "assistant", "content": turn["sql"]})
     messages.append({"role": "user", "content": question})
@@ -104,7 +105,10 @@ def build_retry_messages(question, failed_sql, error):
         {"role": "system", "content": RETRY_SYSTEM_PROMPT},
         {"role": "user", "content": question},
         {"role": "assistant", "content": failed_sql},
-        {"role": "user", "content": f"That query failed with this error:\n{error}\n\nReturn a corrected query."},
+        {
+            "role": "user",
+            "content": f"That query failed with this error:\n{error}\n\nReturn a corrected query.",
+        },
     ]
 
 
