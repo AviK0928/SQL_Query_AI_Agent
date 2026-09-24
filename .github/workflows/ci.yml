@@ -1,0 +1,100 @@
+# Continuous integration: the same gate as dev.ipynb Cell 9, plus security scans.
+#
+# Never calls Groq: no secrets are exposed to this workflow, and tests/conftest.py
+# blocks and records any network attempt (T1). Live evals run only from a
+# separate, manually dispatched workflow (Phase 10).
+#
+# Action versions are pinned to major tags; Dependabot (.github/dependabot.yml)
+# proposes updates weekly.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  MIN_TESTS: "106"  # raise deliberately when tests are added; CI fails if the count drops (T4)
+
+jobs:
+  lint:
+    name: Lint and types
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: ruff lint
+        run: ruff check --output-format=github .
+      - name: ruff format
+        run: ruff format --check .
+      - name: mypy
+        run: mypy app
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.12", "3.13"]  # Render runs 3.12, Colab 3.13 (A-24)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Test count
+        run: |
+          count=$(pytest --collect-only -q | tail -n 1 | grep -oE '^[0-9]+')
+          echo "Collected ${count} tests (minimum ${MIN_TESTS})" | tee -a "$GITHUB_STEP_SUMMARY"
+          test "${count}" -ge "${MIN_TESTS}"
+      - name: pytest
+        run: pytest -q --cov --cov-report=term
+
+  security:
+    name: Security scans
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # gitleaks scans commit history, not only the tree
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: bandit
+        run: bandit -c pyproject.toml -r app
+      - name: pip-audit
+        run: pip-audit --skip-editable --progress-spinner off
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

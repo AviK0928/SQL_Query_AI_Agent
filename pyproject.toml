@@ -11,8 +11,9 @@ requires-python = ">=3.12,<3.14"  # 3.12 on Render, 3.13 on Colab (A-24)
 authors = [{ name = "Aviraj Khanchi" }]
 
 # Exact pins for every direct dependency. Runtime pins carried over from the old
-# requirements.txt (verified 15 Aug 2026); pydantic-settings and all dev pins
-# taken from a clean Colab venv `pip freeze` on 24 Sep 2026 (Python 3.13.15).
+# requirements.txt (verified 15 Aug 2026); pydantic-settings and dev pins taken
+# from a clean Colab venv `pip freeze` on 24 Sep 2026 (Python 3.13.15); bandit,
+# pip-audit and pytest 9.0.3 added in Phase 2 after a local scan.
 # Transitive packages are observed, not pinned: langchain-core 1.6.4,
 # groq 0.37.1, pydantic 2.13.5 (recorded as a D-entry in Phase 1).
 dependencies = [
@@ -26,12 +27,14 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest==8.4.2",
+    "pytest==9.0.3",               # 8.4.2 had PYSEC-2026-1845 (pip-audit, S5)
     "httpx==0.28.1",              # FastAPI TestClient transport
     "pytest-cov==7.1.0",
     "ruff==0.16.8",
     "mypy==2.3.1",
     "pre-commit==4.6.2",
+    "bandit[toml]==1.9.4",        # security lint of app/ (CI)
+    "pip-audit==2.10.1",          # known-vulnerability audit of installed deps (CI)
 ]
 
 [tool.setuptools]
@@ -57,6 +60,12 @@ branch = true
 show_missing = true
 skip_covered = true
 # fail_under is set in Phase 8 once thresholds are agreed.
+
+# --- bandit --------------------------------------------------------------
+[tool.bandit]
+# Only application code is scanned; tests use assert by design and evals/
+# drives git via subprocess on purpose.
+exclude_dirs = ["tests", "evals", "notebooks", "database"]
 
 # --- ruff ----------------------------------------------------------------
 [tool.ruff]
