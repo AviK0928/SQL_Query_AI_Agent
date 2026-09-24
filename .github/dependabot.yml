@@ -1,4 +1,5 @@
 # Weekly update PRs. Every PR runs CI, so an update merges only if the gate is green.
+# Updates are grouped so sibling PRs cannot conflict on the same pyproject.toml lines (README P11).
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -6,8 +7,16 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ["*"]
   - package-ecosystem: pip
     directory: "/"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      # Majors stay as separate PRs: LangChain-family majors are breaking and get reviewed alone.
+      pip-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
