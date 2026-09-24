@@ -95,6 +95,6 @@ jobs:
       - name: pip-audit
         run: pip-audit --skip-editable --progress-spinner off
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
