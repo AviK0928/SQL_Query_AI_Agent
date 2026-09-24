@@ -19,6 +19,7 @@ authors = [{ name = "Aviraj Khanchi" }]
 dependencies = [
     "fastapi==0.141.1",
     "uvicorn[standard]==0.53.0",
+    "sqlglot==30.19.0",
     "langgraph==1.2.11",
     "langchain-groq==1.1.3",
     "python-dotenv==1.2.3",       # read by pydantic-settings for .env support
@@ -28,6 +29,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest==9.1.1",               # 8.4.2 had PYSEC-2026-1845 (pip-audit, S5)
+    "hypothesis==6.168.1",
+    "mutmut==3.8.0",
     "httpx==0.28.1",              # FastAPI TestClient transport
     "pytest-cov==7.1.0",
     "ruff==0.16.8",
@@ -116,3 +119,12 @@ strict_equality = true
 [tool.pydantic-mypy]
 init_typed = true
 warn_required_dynamic_aliases = true
+
+[[tool.mypy.overrides]]
+module = ["app.sql.*"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_any_generics = true
+warn_return_any = true
+strict_equality = true
