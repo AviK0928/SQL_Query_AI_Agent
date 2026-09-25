@@ -303,7 +303,7 @@ def run(
         "datasets": {s: sha(DATASETS / SUITES[s]) for s in suites},
         "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
-    (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=1))
+    (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
 
     agents: dict[int, Any] = {}
     gateways: dict[int, Recorder] = {}
