@@ -1,0 +1,26 @@
+# Fails a pull request whose title is not a conventional commit (README P15).
+# The squash-merge commit message is the PR title (P10), so this keeps main's
+# history conventional. Re-runs when the title is edited.
+name: pr-title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  conventional-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Title must be a conventional commit (max 72 characters)
+        env:
+          TITLE: ${{ github.event.pull_request.title }}  # via env, never inlined into the script
+        run: |
+          pattern='^(feat|fix|docs|test|ci|refactor|chore|perf|build)(\([a-z0-9._/-]+\))?!?: .+'
+          if [[ "$TITLE" =~ $pattern ]] && [ "${#TITLE}" -le 72 ]; then
+            echo "ok: $TITLE"
+          else
+            echo "::error::PR title must look like 'feat(agent): short summary' (max 72 characters). Got: $TITLE"
+            exit 1
+          fi

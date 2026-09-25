@@ -413,3 +413,90 @@ def test_build_llm_assembles_the_stack_without_a_network_call(test_settings, tmp
 
     cached = build_llm(test_settings.model_copy(update={"llm_cache_path": tmp_path / "c.sqlite"}))
     assert cached.cache is not None
+
+
+# --- 10. guard_input and classify_intent (Phase 5) ----------------------
+
+
+@pytest.mark.parametrize(
+    ("question", "code"),
+    [("   ", "INPUT_EMPTY"), ("???", "INPUT_NO_TEXT"), ("x" * 501, "INPUT_TOO_LONG")],
+)
+def test_guard_rejects_without_a_model_call(make_agent, sql_seen, question, code):
+    fake = FakeLLM()  # nothing scripted: any model call fails the test
+    result = make_agent(fake).ask(question)
+    assert result["error"] == code
+    assert result["answer"].strip()
+    assert fake.call_count == 0
+    assert sql_seen == []
+
+
+def test_a_clarifying_question_ends_the_turn(make_agent, sql_seen):
+    fake = FakeLLM("CLARIFY: Best by total spend or by number of orders?")
+    result = make_agent(fake).ask("Who are the best customers?")
+    assert result["needs_clarification"] is True
+    assert result["answer"] == "Best by total spend or by number of orders?"
+    assert (result["sql"], result["error"], result["out_of_scope"]) == (None, None, False)
+    assert fake.call_count == 1
+    assert sql_seen == []
+
+
+def test_ordinary_answers_do_not_need_clarification(make_agent):
+    result = make_agent(FakeLLM("SELECT name FROM customers LIMIT 1", "One.")).ask("One customer")
+    assert result["needs_clarification"] is False
+
+
+# --- 11. configurable repair attempts (Phase 5) ---------------------------
+
+
+@pytest.mark.parametrize(("attempts", "calls"), [(0, 1), (2, 3)])
+def test_repair_attempts_are_configurable_and_bounded(make_agent, attempts, calls):
+    fake = FakeLLM(
+        "SELECT revenue FROM customers",
+        "SELECT nope FROM customers",
+        "SELECT still_nope FROM customers",
+    )
+    result = make_agent(fake, max_repair_attempts=attempts).ask("Show me revenue")
+    assert result["error"] == SqlErrorCode.EXECUTION_ERROR
+    assert fake.call_count == calls, "generation plus exactly `attempts` repairs, no answer call"
+
+
+def test_a_second_repair_can_succeed(make_agent):
+    fake = FakeLLM(
+        "SELECT revenue FROM customers",
+        "SELECT nope FROM customers",
+        "SELECT name FROM customers LIMIT 2",
+        "Two customers.",
+    )
+    result = make_agent(fake, max_repair_attempts=2).ask("Show me revenue")
+    assert result["error"] is None
+    assert len(result["rows"]) == 2
+    assert fake.roles.count(LlmRole.SQL_REPAIR) == 2
+
+
+# --- 12. check_answer (Phase 5) -------------------------------------------
+
+
+def test_check_answer_appends_a_missing_truncation_disclosure(make_agent):
+    fake = FakeLLM("SELECT id FROM customers ORDER BY id", "Two customers shown.")
+    result = make_agent(fake, max_rows=2).ask("List customer ids")
+    assert result["answer"].startswith("Two customers shown. Only the first 2 rows")
+    assert result["answer_checks"] == ["TRUNCATION_UNDISCLOSED"]
+
+
+def test_check_answer_leaves_an_honest_answer_alone(make_agent):
+    fake = FakeLLM("SELECT name FROM customers WHERE city = 'Goa'", "No customers live in Goa.")
+    result = make_agent(fake).ask("Customers in Goa?")
+    assert result["answer"] == "No customers live in Goa."
+    assert result["answer_checks"] == []
+
+
+def test_check_answer_flags_numbers_not_in_the_rows(make_agent):
+    fake = FakeLLM("SELECT COUNT(*) FROM customers", "There are 999 customers.")
+    result = make_agent(fake).ask("How many customers?")
+    assert result["answer"] == "There are 999 customers."
+    assert "UNSUPPORTED_NUMBERS" in result["answer_checks"]
+
+
+def test_check_answer_skips_refusals(make_agent):
+    assert make_agent(FakeLLM("OUT_OF_SCOPE")).ask("Write Python")["answer_checks"] == []

@@ -117,6 +117,7 @@ def test_chat_response_shape_is_complete(make_client):
         "out_of_scope",
         "session_id",
         "request_id",
+        "needs_clarification",
     ]:
         assert key in data, f"missing key: {key}"
 
@@ -329,3 +330,17 @@ def test_a_rate_limited_model_is_a_coded_answer_not_an_internal_error(make_clien
     assert "busy" in data["answer"]
     assert "rate limited on big" not in response.text
     assert data["sql"] is None
+
+
+def test_a_clarifying_question_is_kept_in_the_conversation(make_client):
+    fake = FakeLLM(
+        "CLARIFY: By spend or by order count?", "SELECT name FROM customers LIMIT 1", "One."
+    )
+    client = make_client(fake)
+    first = client.post("/chat", json={"question": "Who are the best customers?"}).json()
+    assert first["needs_clarification"] is True
+    assert first["answer"] == "By spend or by order count?"
+    client.post("/chat", json={"question": "By spend", "session_id": first["session_id"]})
+    replayed = [m["content"] for m in fake.calls[1]]
+    assert "Who are the best customers?" in replayed
+    assert "CLARIFY: By spend or by order count?" in replayed

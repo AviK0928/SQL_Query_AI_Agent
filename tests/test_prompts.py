@@ -133,6 +133,7 @@ def test_answer_messages_cap_rows_sent_to_llm():
         "cancelled",  # exclude cancelled orders from totals
         "LIMIT",  # cap result size
         OUT_OF_SCOPE_TOKEN,  # scope + injection handling
+        "CLARIFY",  # ask when a needed choice is missing (Phase 5)
     ],
 )
 def test_sql_prompt_states_key_rules(rule):

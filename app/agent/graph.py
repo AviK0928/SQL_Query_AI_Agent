@@ -1,47 +1,39 @@
-"""LangGraph flow: question -> SQL -> validate -> execute -> answer.
+"""The LangGraph flow and the Agent that owns it (moved from app/agent.py in Phase 5).
 
-Validation and execution go through the SQL safety layer in app/sql/: the
-sqlglot validator (S1) and the read-only executor (S2). Failures arrive as
-SqlSafetyError codes. Only repairable codes (a parse error, an unknown table or
-column, an invalid LIMIT) earn the single retry; a forbidden write, a stacked
-statement or a timeout is final, because retrying it spends a Groq request with
-no chance of a safe, useful result.
-
-The retry path increments retry_count, so a second failure can only route to
-the answer node -- an infinite loop is structurally impossible, not merely
-guarded against.
-
-Every model call goes through the LLM gateway (app/llm/gateway.py) with a
-role per node (sql_generator, sql_repair, synthesizer), the prompt id, the
-schema hash and a request id shared by all calls for one question. An LlmError
-from generation or repair becomes a fixed answer and an LLM_* error code; if
-only the summary fails, the rows that were already fetched are still returned.
-
-Dependencies (settings, LLM gateway, schema reader, executor) are passed to the
-Agent constructor. There are no module-level clients or graphs; tests build an
-Agent with a fake LLM instead of patching globals.
-Spring comparison: constructor injection instead of static fields.
+Flow: guard_input -> generate_sql -> classify_intent -> validate -> execute
+-> (repair, if repairable, up to MAX_REPAIR_ATTEMPTS times) -> format_answer.
+A rejected question ends at
+guard_input with no model call; a refusal or a clarifying question ends at
+classify_intent. Node decisions live in app/agent/nodes/ as pure functions.
 """
 
 from __future__ import annotations
 
 import re
 import uuid
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any
 
 from langgraph.graph import END, StateGraph
 
+from app.agent.llm import _add_usage, build_llm
+from app.agent.nodes.check import check_answer
+from app.agent.nodes.classify import Intent, classify_reply
+from app.agent.nodes.guard import guard_input
+from app.agent.replies import (
+    LLM_ERROR_REPLIES,
+    NO_USAGE,
+    OUT_OF_SCOPE_REPLY,
+    READ_ONLY_REPLY,
+    SUMMARY_UNAVAILABLE_REPLY,
+    TEMPERATURE,
+)
+from app.agent.state import AgentState
 from app.db import Database
-from app.llm.cache import ResponseCache
-from app.llm.calllog import CallLogger
-from app.llm.client import LlmClient, LlmError, LlmErrorCode, build_groq_transport
-from app.llm.gateway import LlmGateway
-from app.llm.limiter import RateLimiter
-from app.llm.registry import LlmRole, ModelRegistry
+from app.llm.client import LlmError
+from app.llm.registry import LlmRole
 from app.prompts import (
     ANSWER_PROMPT_ID,
     OUT_OF_SCOPE_TOKEN,
-    READ_ONLY_TOKEN,
     RETRY_PROMPT_ID,
     SQL_PROMPT_ID,
     build_answer_messages,
@@ -50,54 +42,10 @@ from app.prompts import (
 )
 from app.sql.errors import USER_MESSAGES, SqlErrorCode, SqlSafetyError
 from app.sql.executor import ReadOnlyExecutor
-from app.sql.validator import ValidatedQuery, validate_sql
+from app.sql.validator import validate_sql
 
 if TYPE_CHECKING:
     from app.config import Settings
-
-TEMPERATURE = 0
-
-READ_ONLY_REPLY = (
-    "I can only read from this database, not change it. "
-    "Try asking a question about the existing data instead."
-)
-
-OUT_OF_SCOPE_REPLY = (
-    "I can only answer questions about the e-commerce database "
-    "(customers, products, orders and order items). Try asking about "
-    "customers, sales or products."
-)
-
-LLM_ERROR_REPLIES = {
-    LlmErrorCode.RATE_LIMITED: "The AI service is busy right now. Please try again in a minute.",
-    LlmErrorCode.TIMEOUT: "The AI service took too long to respond. Please try again.",
-    LlmErrorCode.UNAVAILABLE: "The AI service is unavailable right now. Please try again shortly.",
-    LlmErrorCode.MODEL_UNAVAILABLE: "The AI model is unavailable. Please try again later.",
-    LlmErrorCode.BAD_REQUEST: "That question could not be processed. Try a shorter or simpler one.",
-}
-
-SUMMARY_UNAVAILABLE_REPLY = "Here are the results; a summary couldn't be generated right now."
-
-NO_USAGE = {"calls": 0, "cache_hits": 0, "input_tokens": 0, "output_tokens": 0}
-
-
-class AgentState(TypedDict, total=False):
-    question: str
-    history: list
-    sql: str | None  # latest SQL from the model (raw until validated)
-    validated: ValidatedQuery | None  # set only when validation passed
-    columns: list
-    rows: list
-    truncated: bool
-    limit_reached: bool
-    error: str | None  # an SqlErrorCode value
-    error_detail: str | None  # for the retry prompt only; never shown to users
-    repairable: bool
-    retry_count: int
-    out_of_scope: bool
-    answer: str
-    request_id: str
-    usage: dict[str, int]  # tokens for this question only
 
 
 def _clean_sql(text):
@@ -113,38 +61,24 @@ def _error_state(exc: SqlSafetyError) -> dict[str, Any]:
     return {"error": exc.code.value, "error_detail": exc.detail, "repairable": exc.repairable}
 
 
-def build_llm(settings: Settings) -> LlmGateway:
-    """The production LLM stack, configured only from Settings (never os.environ):
-    Groq transport -> LlmClient (rate limiter, retries, fallback) -> LlmGateway
-    (cache when LLM_CACHE_PATH is set, call log). Builds objects only; no network."""
-    registry = ModelRegistry.from_settings(settings)
-    client = LlmClient(
-        registry,
-        build_groq_transport(settings.groq_api_key.get_secret_value(), settings.llm_timeout_s),
-        max_attempts=settings.llm_max_attempts,
-        max_wait_s=settings.llm_max_wait_s,
-        limiter=RateLimiter(
-            registry, margin=settings.llm_safety_margin, max_wait_s=settings.llm_max_wait_s
-        ),
-    )
-    cache = ResponseCache(settings.llm_cache_path) if settings.llm_cache_path else None
-    return LlmGateway(client, cache=cache, call_log=CallLogger.from_settings(settings))
+def route_after_guard(state):
+    return "end" if state.get("blocked") else "generate_sql"
 
 
-def _add_usage(usage: dict[str, int] | None, result: Any) -> dict[str, int]:
-    total = dict(usage or NO_USAGE)
-    if getattr(result, "cache_hit", False):
-        total["cache_hits"] += 1
-    else:
-        total["calls"] += 1
-        total["input_tokens"] += getattr(result, "input_tokens", 0)
-        total["output_tokens"] += getattr(result, "output_tokens", 0)
-    return total
+def route_after_classify(state):
+    """Only SQL continues; refusals and clarifying questions are already answered."""
+    if state.get("out_of_scope") or state.get("needs_clarification"):
+        return "end"
+    return "validate"  # even an empty reply: the validator answers EMPTY_QUERY
 
 
 def route_after_execute(state):
-    """The only branch in the graph: one retry, and only for repairable errors."""
-    if state.get("error") and state.get("repairable") and state.get("retry_count", 0) == 0:
+    """Repair only repairable errors, and at most MAX_REPAIR_ATTEMPTS times."""
+    if (
+        state.get("error")
+        and state.get("repairable")
+        and state.get("retry_count", 0) < state.get("max_repairs", 1)
+    ):
         return "retry"
     return "answer"
 
@@ -187,20 +121,29 @@ class Agent:
 
     # --- nodes ----------------------------------------------------------
 
+    def guard(self, state):
+        """No model call: reject empty, oversized or non-text questions."""
+        rejection = guard_input(state.get("question"))
+        if rejection is None:
+            return {"blocked": False}
+        return {"blocked": True, "error": rejection.code, "answer": rejection.reply, "sql": None}
+
     def generate_sql(self, state):
-        """LLM call 1: question -> SQL, or a refusal token."""
+        """LLM call 1: question -> SQL, or a token (READ_ONLY, CLARIFY, OUT_OF_SCOPE)."""
         messages = build_sql_messages(state["question"], state.get("history"))
         raw, usage = self._complete(state, LlmRole.SQL_GENERATOR, messages, SQL_PROMPT_ID)
-        text = _clean_sql(raw)
+        return {"reply": _clean_sql(raw), "usage": usage}
 
-        # Specific before general: a write request gets the read-only reply.
-        if READ_ONLY_TOKEN in text.upper():
-            return {"out_of_scope": True, "sql": None, "answer": READ_ONLY_REPLY, "usage": usage}
-
-        if OUT_OF_SCOPE_TOKEN in text.upper():
-            return {"out_of_scope": True, "sql": None, "answer": OUT_OF_SCOPE_REPLY, "usage": usage}
-
-        return {"sql": text, "out_of_scope": False, "error": None, "usage": usage}
+    def classify(self, state):
+        """No model call: decide what the generator's reply is."""
+        result = classify_reply(state.get("reply", ""))
+        if result.intent is Intent.READ_ONLY:
+            return {"out_of_scope": True, "sql": None, "answer": READ_ONLY_REPLY}
+        if result.intent is Intent.OUT_OF_SCOPE:
+            return {"out_of_scope": True, "sql": None, "answer": OUT_OF_SCOPE_REPLY}
+        if result.intent is Intent.CLARIFY:
+            return {"needs_clarification": True, "sql": None, "answer": result.text}
+        return {"sql": result.text, "out_of_scope": False, "error": None}
 
     def validate(self, state):
         """Pure Python. No LLM, no database."""
@@ -262,10 +205,10 @@ class Agent:
                 "out_of_scope": True,
                 "sql": None,
                 "answer": OUT_OF_SCOPE_REPLY,
-                "retry_count": 1,
+                "retry_count": state.get("retry_count", 0) + 1,
             }
 
-        return {**cleared, "sql": text, "retry_count": 1}
+        return {**cleared, "sql": text, "retry_count": state.get("retry_count", 0) + 1}
 
     def format_answer(self, state):
         """LLM call 3: turn rows into a sentence."""
@@ -290,19 +233,40 @@ class Agent:
             return {"answer": SUMMARY_UNAVAILABLE_REPLY, "error": exc.code.value}
         return {"answer": text.strip(), "usage": usage}
 
+    def check(self, state):
+        """No model call: guarantee honest disclosure; record unsupported numbers."""
+        if state.get("error") or state.get("out_of_scope") or not state.get("answer"):
+            return {"answer_checks": []}
+        result = check_answer(
+            state["answer"],
+            state.get("rows", []),
+            question=state.get("question", ""),
+            truncated=state.get("truncated", False),
+            limit_reached=state.get("limit_reached", False),
+        )
+        return {"answer": result.answer, "answer_checks": list(result.findings)}
+
     # --- graph ----------------------------------------------------------
 
     def _build_graph(self):
         g = StateGraph(AgentState)
 
+        g.add_node("guard_input", self.guard)
         g.add_node("generate_sql", self.generate_sql)
+        g.add_node("classify_intent", self.classify)
         g.add_node("validate", self.validate)
         g.add_node("execute", self.execute)
         g.add_node("retry", self.retry)
         g.add_node("format_answer", self.format_answer)
 
-        g.set_entry_point("generate_sql")
-        g.add_edge("generate_sql", "validate")
+        g.set_entry_point("guard_input")
+        g.add_conditional_edges(
+            "guard_input", route_after_guard, {"generate_sql": "generate_sql", "end": END}
+        )
+        g.add_edge("generate_sql", "classify_intent")
+        g.add_conditional_edges(
+            "classify_intent", route_after_classify, {"validate": "validate", "end": END}
+        )
         g.add_edge("validate", "execute")
         g.add_conditional_edges(
             "execute",
@@ -310,7 +274,9 @@ class Agent:
             {"retry": "retry", "answer": "format_answer"},
         )
         g.add_edge("retry", "validate")  # retried SQL is re-validated
-        g.add_edge("format_answer", END)
+        g.add_node("check_answer", self.check)
+        g.add_edge("format_answer", "check_answer")
+        g.add_edge("check_answer", END)
 
         return g.compile()
 
@@ -331,6 +297,9 @@ class Agent:
                     "retry_count": 0,
                     "request_id": request_id,
                     "usage": dict(NO_USAGE),
+                    "blocked": False,
+                    "max_repairs": self.settings.max_repair_attempts,
+                    "needs_clarification": False,
                 }
             )
         except LlmError as exc:
@@ -344,6 +313,8 @@ class Agent:
                 "limit_reached": False,
                 "error": exc.code.value,
                 "out_of_scope": False,
+                "needs_clarification": False,
+                "answer_checks": [],
                 "request_id": request_id,
                 "usage": dict(NO_USAGE),
             }
@@ -358,6 +329,8 @@ class Agent:
             "limit_reached": final.get("limit_reached", False),
             "error": final.get("error"),
             "out_of_scope": final.get("out_of_scope", False),
+            "needs_clarification": final.get("needs_clarification", False),
+            "answer_checks": final.get("answer_checks", []),
             "request_id": request_id,
             "usage": final.get("usage", dict(NO_USAGE)),
         }
