@@ -35,3 +35,6 @@ htmlcov/
 
 # mutmut working copy
 mutants/
+
+# eval runner working caches (the report folders are committed)
+evals/reports/*/cache/
