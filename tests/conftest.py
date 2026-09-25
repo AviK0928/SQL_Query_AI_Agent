@@ -16,19 +16,13 @@ import socket
 
 import pytest
 
-from app.config import load_settings
-from tests.fakes import NetworkBlockedError
+from app.config import Settings, load_settings
+from tests.fakes import TEST_LLM_LIMITS, TEST_MODEL, NetworkBlockedError
 
 # Every variable app/config.py reads. Removed for each test so the host
 # environment (Colab sets GROQ_MODEL, a dev shell may set DB_PATH) cannot leak in.
-SETTINGS_ENV_VARS = (
-    "GROQ_API_KEY",
-    "GROQ_MODEL",
-    "DB_PATH",
-    "MAX_ROWS",
-    "QUERY_TIMEOUT_S",
-    "MAX_HISTORY_TURNS",
-)
+# Derived from Settings, so a new setting can never be missed here.
+SETTINGS_ENV_VARS = tuple(name.upper() for name in Settings.model_fields)
 
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "", None}
 
@@ -83,5 +77,8 @@ def test_settings():
     """Valid settings for tests. The key is a dummy; the network guard ensures
     it can never be sent anywhere. `.env` is ignored."""
     return load_settings(
-        env_file=None, groq_api_key="test-key-not-real", groq_model="fake/test-model"
+        env_file=None,
+        groq_api_key="test-key-not-real",
+        groq_model=TEST_MODEL,
+        llm_limits=TEST_LLM_LIMITS,
     )

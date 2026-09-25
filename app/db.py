@@ -1,4 +1,5 @@
-"""Schema introspection for the /schema endpoint and the prompt-sync tests.
+"""Schema introspection for the /schema endpoint, the prompt-sync tests and the
+schema hash recorded with every LLM call.
 
 Query execution moved to app/sql/executor.py in Phase 3, together with the
 read-only authorizer. This module only reads the schema, over a read-only
@@ -8,6 +9,7 @@ arrives.
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -31,6 +33,24 @@ class Database:
         if not self.path.is_file():
             raise FileNotFoundError("Database file not found. Run: python database/build_db.py")
         return sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+
+    def schema_hash(self) -> str:
+        """Short, stable fingerprint of the schema definition (not the data).
+
+        Recorded with every LLM call and eval result (principle 8), so a result
+        can be tied to the schema it was produced against. Changes when a table,
+        column, index or view definition changes; not when rows change.
+        """
+        con = self._connect()
+        try:
+            rows = con.execute(
+                "SELECT type, name, sql FROM sqlite_master "
+                "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
+            ).fetchall()
+        finally:
+            con.close()
+        canonical = "\n".join(f"{kind}|{name}|{sql or ''}" for kind, name, sql in rows)
+        return hashlib.sha256(canonical.encode()).hexdigest()[:12]
 
     def get_schema(self) -> dict[str, Any]:
         """Return the schema as plain data, for the /schema endpoint."""

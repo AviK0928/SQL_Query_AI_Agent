@@ -163,3 +163,4 @@ API key.
 | Date | Change | Evidence |
 |---|---|---|
 | 25 Sep 2026 (Phase 3) | No prompt text changed: the four prompt constants were compared with the committed versions and are identical. The answer call's result notes became independent and gained the `limit_reached` note. The retry call now runs only for repairable errors. | Notebook cells P3-18, P3-21; `tests/test_prompts.py` |
+| 25 Sep 2026 (Phase 4) | No prompt text changed (the seven prompt constants were compared with the committed versions). Each prompt now has an id derived from its text, sent with every model call for the cache key and the call log: `sql_gen@27e9e81d`, `sql_repair@a5c30252`, `answer@3c3a3566`. The three calls run under the roles `sql_generator`, `sql_repair` and `synthesizer`. | `app/prompts.py`, README D24 |

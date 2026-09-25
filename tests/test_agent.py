@@ -8,11 +8,21 @@ the validator runs, the graph routes, and queries hit the actual SQLite file.
 
 import pytest
 
-from app.agent import READ_ONLY_REPLY, Agent
+from app.agent import (
+    LLM_ERROR_REPLIES,
+    READ_ONLY_REPLY,
+    SUMMARY_UNAVAILABLE_REPLY,
+    Agent,
+    build_llm,
+)
 from app.config import load_settings
+from app.llm.client import LlmError, LlmErrorCode
+from app.llm.gateway import LlmGateway
+from app.llm.registry import LlmRole
+from app.prompts import ANSWER_PROMPT_ID, RETRY_PROMPT_ID, SQL_PROMPT_ID
 from app.sql.errors import USER_MESSAGES, SqlErrorCode
 from app.sql.executor import ReadOnlyExecutor
-from tests.fakes import FakeLLM
+from tests.fakes import TEST_LLM_LIMITS, FakeLLM
 
 
 @pytest.fixture
@@ -26,6 +36,7 @@ def make_agent(test_settings):
                 env_file=None,
                 groq_api_key="test-key-not-real",
                 groq_model="fake/test-model",
+                llm_limits=TEST_LLM_LIMITS,
                 **overrides,
             )
         return Agent(settings, llm=fake)
@@ -321,3 +332,84 @@ def test_history_is_truncated_to_max_turns(make_agent):
     assert "q0" not in replayed, "old turns must be dropped"
     assert "q9" in replayed, "most recent turn must be kept"
     assert len(replayed) == bot.settings.max_history_turns + 1
+
+
+# --- 9. LLM gateway wiring (Phase 4) ------------------------------------
+
+
+def test_each_node_calls_the_model_for_its_role(make_agent):
+    fake = FakeLLM("SELECT revenue FROM customers", "SELECT name FROM customers LIMIT 1", "One.")
+    make_agent(fake).ask("Show me revenue")
+    assert fake.roles == [LlmRole.SQL_GENERATOR, LlmRole.SQL_REPAIR, LlmRole.SYNTHESIZER]
+    assert [k["prompt_id"] for k in fake.kwargs] == [
+        SQL_PROMPT_ID,
+        RETRY_PROMPT_ID,
+        ANSWER_PROMPT_ID,
+    ]
+
+
+def test_every_call_carries_the_schema_hash_and_one_request_id(make_agent):
+    fake = FakeLLM("SELECT name FROM customers LIMIT 1", "One.", "SELECT 1", "One.")
+    bot = make_agent(fake)
+    first = bot.ask("q1")
+    second = bot.ask("q2")
+    hashes = {k["schema_hash"] for k in fake.kwargs}
+    assert hashes == {bot.schema_hash} and len(bot.schema_hash) == 12
+    assert [k["request_id"] for k in fake.kwargs] == [first["request_id"]] * 2 + [
+        second["request_id"]
+    ] * 2
+    assert first["request_id"] != second["request_id"]
+    assert all(k["temperature"] == 0 for k in fake.kwargs)
+
+
+def test_usage_totals_this_question_only(make_agent):
+    fake = FakeLLM("SELECT name FROM customers LIMIT 1", "One.")
+    result = make_agent(fake).ask("One customer")
+    assert result["usage"] == {
+        "calls": 2,
+        "cache_hits": 0,
+        "input_tokens": 200,
+        "output_tokens": 20,
+    }
+
+
+@pytest.mark.parametrize("code", list(LlmErrorCode))
+def test_llm_failure_during_generation_becomes_a_coded_answer(make_agent, sql_seen, code):
+    fake = FakeLLM(LlmError(code, "provider trouble"))
+    result = make_agent(fake).ask("How many customers?")
+    assert result["error"] == code.value
+    assert result["answer"] == LLM_ERROR_REPLIES[code]
+    assert (result["sql"], result["rows"]) == (None, [])
+    assert "provider trouble" not in result["answer"]
+    assert sql_seen == []
+
+
+def test_llm_failure_during_repair_becomes_a_coded_answer(make_agent):
+    fake = FakeLLM("SELECT revenue FROM customers", LlmError(LlmErrorCode.TIMEOUT, "slow"))
+    result = make_agent(fake).ask("Show me revenue")
+    assert result["error"] == "LLM_TIMEOUT"
+    assert result["sql"] is None
+
+
+def test_llm_failure_during_the_summary_keeps_the_rows(make_agent):
+    fake = FakeLLM(
+        "SELECT name FROM customers ORDER BY id LIMIT 2",
+        LlmError(LlmErrorCode.RATE_LIMITED, "busy"),
+    )
+    result = make_agent(fake).ask("Two customers")
+    assert result["answer"] == SUMMARY_UNAVAILABLE_REPLY
+    assert result["error"] == "LLM_RATE_LIMITED"
+    assert len(result["rows"]) == 2
+    assert result["sql"] == "SELECT name FROM customers ORDER BY id LIMIT 2"
+
+
+def test_build_llm_assembles_the_stack_without_a_network_call(test_settings, tmp_path):
+    gateway = build_llm(test_settings)
+    assert isinstance(gateway, LlmGateway)
+    assert gateway.cache is None, "no cache unless LLM_CACHE_PATH is set"
+    assert gateway.call_log is not None and gateway.call_log.log_content is False
+    assert gateway.client.limiter is not None
+    assert gateway.client.max_attempts == test_settings.llm_max_attempts
+
+    cached = build_llm(test_settings.model_copy(update={"llm_cache_path": tmp_path / "c.sqlite"}))
+    assert cached.cache is not None
