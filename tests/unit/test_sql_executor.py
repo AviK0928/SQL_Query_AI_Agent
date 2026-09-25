@@ -191,3 +191,42 @@ def test_validated_sql_returns_the_same_rows_as_the_original(db_path, sql):
     result = run(db_path, sql, max_rows=10_000)
     assert result.rows == expected
     assert not result.truncated
+
+
+# --- mutation-testing follow-ups (Phase 3, step 4c) -------------------------
+
+
+def test_a_one_row_cap_is_valid(db_path):
+    result = run(db_path, "SELECT id FROM customers ORDER BY id", max_rows=1)
+    assert result.row_count == 1
+    assert result.truncated
+
+
+@pytest.mark.parametrize(
+    ("max_rows", "timeout_s", "param"), [(0, 5.0, "max_rows"), (10, 0, "timeout_s")]
+)
+def test_invalid_limit_errors_name_the_parameter(db_path, max_rows, timeout_s, param):
+    with pytest.raises(ValueError, match=param):
+        ReadOnlyExecutor(db_path, max_rows=max_rows, timeout_s=timeout_s)
+
+
+def test_missing_database_error_says_how_to_build_it(tmp_path):
+    with pytest.raises(FileNotFoundError, match="build_db.py"):
+        ReadOnlyExecutor(tmp_path / "missing.db", 200, 5.0).allowed_tables()
+
+
+def test_connection_is_read_only_without_the_authorizer(db_path):
+    """S2 must not depend on the authorizer alone, or on SQLite's URI default."""
+    con = ReadOnlyExecutor(db_path, 200, 5.0)._connect()
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            con.execute("CREATE TABLE should_not_exist (x INTEGER)")
+    finally:
+        con.close()
+
+
+def test_denied_query_log_includes_the_sqlite_reason(db_path, caplog):
+    forged = ValidatedQuery(sql="DELETE FROM customers", tables=frozenset(), query_limit=None)
+    with caplog.at_level(logging.WARNING, logger="app.sql.executor"), pytest.raises(SqlSafetyError):
+        ReadOnlyExecutor(db_path, 200, 5.0).execute(forged)
+    assert "not authorized" in caplog.text
