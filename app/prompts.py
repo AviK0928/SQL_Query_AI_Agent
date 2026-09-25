@@ -1,8 +1,8 @@
 """Prompt templates for the SQL agent.
 Everything the LLM ever sees is assembled here. Note that prompts
 are not a security boundary (see D2 in the README): the guarantees
-are enforced by validator.py and db.py. Instructions here reduce
-retries and cost, nothing more."""
+are enforced in code by app/sql/validator.py and app/sql/executor.py.
+Instructions here reduce retries and cost, nothing more."""
 
 # Refusal markers the model emits; not credentials (bandit B105 false positive, S4).
 OUT_OF_SCOPE_TOKEN = "OUT_OF_SCOPE"  # nosec B105
@@ -91,6 +91,22 @@ Rules:
 - If the results were truncated, mention that only the first rows are shown.
 - Do not invent numbers that are not in the results."""
 
+# Result notes. Each flag is disclosed independently: a hidden-rows note must
+# not replace the truncation note, or a capped result looks complete.
+ROWS_HIDDEN_NOTE = (
+    "(showing the first 20 of {shown} rows; do not describe these "
+    "as the highest, lowest or total unless the query itself ordered or "
+    "aggregated them)"
+)
+TRUNCATED_NOTE = (
+    "(results were truncated: more rows matched than the server returns, "
+    "so these are not all the matching rows)"
+)
+LIMIT_REACHED_NOTE = (
+    "(the query's LIMIT was reached, so more matching rows may exist; "
+    "do not describe these as all of them)"
+)
+
 
 def build_sql_messages(question, history=None):
     """Messages for the initial SQL generation call."""
@@ -115,22 +131,23 @@ def build_retry_messages(question, failed_sql, error):
     ]
 
 
-def build_answer_messages(question, columns, rows, truncated=False):
+def build_answer_messages(question, columns, rows, truncated=False, limit_reached=False):
     """Messages for turning result rows into a sentence."""
+    notes = []
     if rows:
         header = " | ".join(columns)
         body = "\n".join(" | ".join(str(v) for v in row) for row in rows[:20])
         table = f"{header}\n{body}"
         if len(rows) > 20:
-            table += (
-                f"\n(showing the first 20 of {len(rows)} rows; do not describe these "
-                "as the highest, lowest or total unless the query itself ordered or "
-                "aggregated them)"
-            )
-        elif truncated:
-            table += "\n(results were truncated)"
+            notes.append(ROWS_HIDDEN_NOTE.format(shown=len(rows)))
     else:
         table = "(no rows returned)"
+
+    if truncated:
+        notes.append(TRUNCATED_NOTE)
+    if limit_reached:
+        notes.append(LIMIT_REACHED_NOTE)
+    table = "\n".join([table, *notes])
 
     return [
         {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
