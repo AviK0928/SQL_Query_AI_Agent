@@ -213,3 +213,4 @@ The findings above are the Phase 0 snapshot and are kept as recorded.
 | Test gap: no property tests on the validator | Closed in Phase 3. | README T6 |
 | Test gap: no test that a model-imposed LIMIT is disclosed | Closed in Phase 3 (`test_limit_reached_*`). | README D19 |
 | A-22 unrequested personal data | Open; prompt work in Phase 7. | — |
+| A-05 no 429 defences | Resolved in Phase 4: client-side rate limiter, `retry-after`, retries with backoff, fallback model, response cache and token accounting. | README D23, V1 |

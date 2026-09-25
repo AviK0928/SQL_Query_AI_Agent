@@ -60,7 +60,9 @@ the thing generating the SQL cannot be trusted.
 flowchart LR
     U[Browser] --> F[FastAPI]
     F --> A[LangGraph agent]
-    A <--> L[Groq LLM]
+    A <--> G[LLM gateway<br/>cache, call log]
+    G <--> C[LLM client<br/>rate limiter, retries, fallback]
+    C <--> L[Groq LLM]
     A --> V[SQL validator<br/>sqlglot AST]
     V --> X[Read-only executor<br/>authorizer, timeout, row cap]
     X --> D[(SQLite<br/>read-only)]
@@ -150,7 +152,7 @@ prints its value (S3). Environment variables override `.env`.
 pytest -q
 ```
 
-**226 tests (T5), no API key needed, no network calls.** The language model is
+**354 tests (T9), no API key needed, no network calls.** The language model is
 replaced by a scripted fake. The suite is offline by construction, not by
 convention: a guard in `tests/conftest.py` removes every setting from the
 environment and blocks and records any non-loopback network attempt, failing
@@ -195,7 +197,7 @@ modify data — gets a polite refusal.
 |---|---|---|
 | `GET` | `/health` | `{"status": "ok"}` |
 | `GET` | `/schema` | Table and column names |
-| `POST` | `/chat` | `answer`, `sql`, `columns`, `rows`, `truncated`, `limit_reached`, `error`, `out_of_scope`, `session_id` |
+| `POST` | `/chat` | `answer`, `sql`, `columns`, `rows`, `truncated`, `limit_reached`, `error`, `out_of_scope`, `session_id`, `request_id` |
 | `GET` | `/` | The frontend |
 
 `POST /chat` takes `{"question": "...", "session_id": "..."}`. The session id is
@@ -203,8 +205,10 @@ optional on the first request and returned in the response; send it back to keep
 conversation context.
 
 Failed queries return HTTP 200 with `error` set to an error code such as
-`EXECUTION_ERROR` or `FORBIDDEN_WRITE` (`app/sql/errors.py`), never database
-text (H1), so the frontend has one response shape to handle. Malformed requests return 422.
+`EXECUTION_ERROR` or `FORBIDDEN_WRITE` (`app/sql/errors.py`), or an `LLM_*` code
+such as `LLM_RATE_LIMITED` (`app/llm/client.py`), never database or provider
+text (H1), so the frontend has one response shape to handle. `request_id` ties a
+response to its LLM call-log lines (H3). Malformed requests return 422.
 
 ## Deployment
 
@@ -239,6 +243,8 @@ The SQLite file is committed, so there is no database to provision.
   default at all (D14).
 - Groq free-tier quotas cap throughput; tokens per minute, not requests, is
   the binding limit (L4)
+- Rate-limit daily counters live in memory and reset on restart; Groq's own
+  headers re-sync the request count on the next call (L7)
 
 Each of these is explained, with the conditions under which it actually bites,
 in [`DISCOVERIES.md`](DISCOVERIES.md).
@@ -272,6 +278,9 @@ recovered and are listed as such rather than invented.
 | D20 | Typed error taxonomy: 13 `SqlErrorCode`s raised as `SqlSafetyError(code, detail)`. Only `PARSE_ERROR`, `UNKNOWN_TABLE`, `EXECUTION_ERROR` and `INVALID_LIMIT` earn the single retry; a forbidden write, stacked statement, timeout or other final code does not, saving a Groq request. Users get a fixed message per code; `detail` goes only to the retry prompt and logs, and the constructor rejects an empty one (found by mutation testing, T7). | `app/sql/errors.py`, `app/agent.py` |
 | D21 | API response (Phase 3): `sql` is the SQL that passed validation and ran, or `null` when nothing passed, so rejected SQL is never shown as the query that ran; `error` is an `SqlErrorCode` value; new field `limit_reached`. The frontend uses `error` only as a flag, so the UI is unchanged. | `app/agent.py`, `app/main.py` |
 | D22 | LLM configuration is typed and explicit. Per-model Groq limits come from `LLM_LIMITS` (JSON copied from the console), and startup is refused if any model the app can call (`GROQ_MODEL`, `GROQ_FALLBACK_MODEL`, `LLM_ROLE_MODELS`) lacks an entry, so no limit is hard-coded or remembered. Models are resolved per role through `ModelRegistry`; every role uses `GROQ_MODEL` until Phase 6 assigns them with evals. The fallback is optional and must differ from the primary. `Database.schema_hash()` fingerprints the schema definition (not the data) for reproducibility records. Deployments must set `LLM_LIMITS` before this code runs. | `app/config.py`, `app/llm/registry.py`, `app/db.py` |
+| D23 | Model calls go through one stack built from `Settings`: the Groq SDK transport (SDK retries off) → `LlmClient` (per-model rate limiter; tenacity retries on 429, 5xx and timeouts, honouring `retry-after` up to `LLM_MAX_WAIT_S`; fallback to `GROQ_FALLBACK_MODEL` on a persistent 429 or a retired model) → `LlmGateway` (cache when `LLM_CACHE_PATH` is set, call log, usage). Nodes call by role (`sql_generator`, `sql_repair`, `synthesizer`) with a request id per question. A failure during generation or repair returns a fixed answer with an `LLM_*` code and no SQL; a failure during the summary keeps the rows. The API gains `request_id`; `internal_error` remains only for unexpected faults, so the A-04 guard test now expects `LLM_UNAVAILABLE`. `langchain-groq` was removed. | `app/llm/`, `app/agent.py`, `app/main.py` |
+| D24 | Each prompt has an id derived from its text (`name@` + 8 hex characters of a SHA-256), sent with every model call: any edit changes the id, which invalidates cached answers and shows in every call-log line which prompt text was used. Phase 7 replaces this with versioned prompt files. At Phase 4: `sql_gen@27e9e81d`, `sql_repair@a5c30252`, `answer@3c3a3566`. | `app/prompts.py`, `tests/unit/test_prompt_ids.py` |
+| D25 | `groq==0.37.1` and `tenacity==9.1.4` are direct, exact pins (D13), because the client imports them. tenacity's typed `stop_any` accepts only `stop_base` instances, so the "retry-after longer than the maximum wait" stop is a small `stop_base` subclass; strict mypy caught this, while every test passed. | `pyproject.toml`, `app/llm/client.py` |
 
 ### Limitations
 
@@ -282,6 +291,7 @@ recovered and are listed as such rather than invented.
 | L4 | Groq free-tier limits for `openai/gpt-oss-120b`, read 24 Sep 2026: 30 RPM, 1K RPD, 8K TPM, 200K TPD. Measured ~590 tokens per call, so TPM is the binding limit (~10 calls/min with a 20% margin). Re-check in the Groq console; limits change. Re-checked 25 Sep 2026: unchanged; `openai/gpt-oss-20b` has the same limits. | `AUDIT.md` §5, `.env.example` |
 | L5 | Prompt rule 3 still asks the model for `LIMIT 100`, below the 200-row cap. Such a result is not truncated by code but may be incomplete; this is disclosed through `limit_reached` (D19). Removing the rule is a prompt change, so it waits for Phase 7 evals. | `app/prompts.py` |
 | L6 | The frontend's truncation note hard-codes "capped at 200". It matches the `MAX_ROWS` default but does not follow the setting. | `frontend/app.js` |
+| L7 | The rate limiter's daily counters live in memory, so a restart forgets how much of the day's quota was used. Groq's `x-ratelimit-remaining-requests` header re-syncs the request count on the next call. The cache and call-log files are not rotated. | `app/llm/limiter.py`, `app/llm/calllog.py` |
 
 ### Security
 
@@ -292,6 +302,7 @@ recovered and are listed as such rather than invented.
 | S3 | `ConfigError` never contains input values. pydantic's own `ValidationError` embeds `input_value`, which can include the API key, so it is replaced and suppressed (`from None`). | `app/config.py`, `tests/test_config.py` |
 | S4 | bandit scans `app/` in CI. Its four findings at introduction were false positives, all in `app/prompts.py`, suppressed line by line with `# nosec <code>` and a reason: B105 on the `OUT_OF_SCOPE`/`READ_ONLY` refusal markers (not credentials) and B608 on the two system prompts (text for the LLM, never executed as SQL). bandit prints "nosec encountered … but no failed test" warnings for lines inside those multi-line strings; they do not fail the scan and disappear in Phase 7, when prompts move to versioned files. | `app/prompts.py`, `pyproject.toml` |
 | S5 | Dependency and secret scanning in CI. pip-audit checks every installed package against known advisories; its first run found PYSEC-2026-1845 in `pytest 8.4.2`, fixed by upgrading the pin to `9.0.3` (same 106 tests collected and passing). gitleaks scans the full commit history on every run; the first run over all history was clean (24 Sep 2026). | `.github/workflows/ci.yml`, `pyproject.toml` |
+| S6 | The API key cannot reach the call log: every record is scrubbed of the configured key before it is written, including prompt text, responses and error details, and unexpected exceptions are logged by type only, never by message. Tested, and confirmed on the first live run (V1). | `app/llm/calllog.py`, `tests/unit/test_llm_calllog.py` |
 
 ### Testing
 
@@ -305,6 +316,7 @@ recovered and are listed as such rather than invented.
 | T6 | Property tests with hypothesis (derandomized `ci` profile, 200 examples; `HYPOTHESIS_PROFILE=dev` runs 5,000): totality over random text and SQL-token soup (anything accepted is re-checked independently), stacked statements never accepted, case- and comment-obfuscated writes always `FORBIDDEN_WRITE`, and the row-cap rule for any LIMIT and cap. The totality property found a real bug on its first run: a bare `SELECT` was accepted and regenerated as `SELECT LIMIT 201`; fixed by re-parsing the regenerated SQL. | `tests/unit/test_sql_properties.py`, `tests/unit/conftest.py` |
 | T7 | Mutation testing (mutmut 3.8, manual, 25 Sep 2026) on `app/sql/validator.py` and `app/sql/executor.py` against `tests/unit`: 394 mutants, 324 killed + 3 timeouts = 83.0%. The first run left 116 survivors; the real gaps were closed with 14 tests and one guard (D20). All 67 remaining survivors are classified: 12 unreachable by the tool (`_classes` runs at import), 19 equivalent (listed in DISCOVERIES), 36 message wording (policy: tests pin the information a message carries, not its phrasing). Excluding the 31 unkillable: 327/363 = 90.1%. | `pyproject.toml` `[tool.mutmut]` |
 | T8 | The offline guard derives the list of environment variables it clears from `Settings` itself, so a newly added setting can never leak from the host environment into a test. | `tests/conftest.py`, `tests/test_config.py` |
+| T9 | 354 tests collected and passing at `3b2ff78`, 25 Sep 2026 (226 before Phase 4); `app/llm` at 100% line and branch coverage. Every resilience path (429 bursts, `retry-after`, over-long waits, retired models, timeouts, 5xx, daily budgets, header feedback) is tested against a scripted transport and a fake clock, so no test waits or touches the network. The A-04 guard test now expects `LLM_UNAVAILABLE` and makes one attempt. The schema-hash method changed: `207e7a26b02f` replaces Phase 0's `cace08063546` as the baseline; the schema itself did not change. | `tests/unit/test_llm_*.py`, `tests/test_offline_guard.py` |
 
 ### Data handling
 
@@ -312,6 +324,7 @@ recovered and are listed as such rather than invented.
 |---|---|---|
 | H1 | Errors reach the client as codes, never database text. SQLite messages go only to the retry prompt and logs (D20, D21). Tested: a failing query's API response contains no `no such column`. | `app/agent.py`, `tests/test_api.py` |
 | H2 | Open, for Phase 9: sqlglot logs a warning containing the SQL text when it falls back to parsing a statement as a raw command (for example `SHOW TABLES`), so model output can reach the logs. To be fixed by lowering sqlglot's log level when logging is designed. | `app/sql/validator.py` |
+| H3 | The LLM call log records metadata by default: model, role, prompt id, schema hash, tokens, latency, attempts, cache hit, error code, message count and total characters, and only Groq's rate-limit headers. Prompt and response text are logged only with `LLM_LOG_CONTENT=true`, which stays off in production. The cache stores a SHA-256 of the prompt, never the prompt itself, plus the response text. | `app/llm/calllog.py`, `app/llm/cache.py` |
 
 ### Process
 
@@ -326,10 +339,13 @@ recovered and are listed as such rather than invented.
 | P11 | Dependabot PR #8 (uvicorn 0.51.0 → 0.53.0) was merged as an empty squash commit (`ec8a5c2`): its change was lost resolving a conflict on the PR branch, so the history said uvicorn was bumped while `pyproject.toml` still pinned 0.51.0. Found in the Phase 2 close-out and restored in Phase 3. Dependabot now groups updates per ecosystem, so sibling PRs no longer conflict on the same `pyproject.toml` lines. Rule since: after merging any PR, `git show --stat` of the merge commit must list the expected files. | `.github/dependabot.yml`, `pyproject.toml` |
 | P12 | Phase 3 landed in two PRs because #16 (validator and executor) was merged mid-phase. It was merged with GitHub's default title `Feat/phase 3 sql safety`, built from the branch name because the PR had several commits, so `main` has one non-conventional subject; history is kept. Its content was verified by fetching `refs/pull/16/head` (GitHub keeps it after the branch is deleted) and comparing it with the last verified commit `2ec48f8`, because the Colab clone no longer had that commit. Rule since: set the PR title by hand before merging. The rule was then missed for #17 and #18 (both `Feat/phase 3 agent wiring`); #19 used a hand-set conventional title. | Notebook cells P3-21, P3-22 |
 | P13 | Three notebook-cell bugs made a correct state look wrong: `.strip()` on multi-line `git status --porcelain` cut the first line's status column; `git add` with a path already removed by `git rm` is a hard error; and a kernel restart drops `PATH` changes made by Cell 7, so the pre-commit mypy hook could not find `mypy`. Rules since: use `git diff --name-only`/`--name-status`; stage only files that exist; cells that commit re-apply the venv `PATH`. Separately, merging `main` back into the branch for #18 conflicted on `.gitignore`; the resolution kept `main`'s version and dropped `mutants/`. It was found by comparing the last verified commit (not the PR head, which was the unverified conflict-resolution merge) with `main`, and restored by #19. | Notebook cells P3-12, P3-23, P3-24, P3-35b, P3-36 |
+| P14 | A recycled VM loses the git identity (it is repo-local config), and a finished step once stopped at `git commit` with its files left uncommitted. Commit cells now check the identity before doing any work. Separately, the assistant's local copy of `client.py` drifted from the repo, so changes to files already edited in Colab are delivered as anchored edits or new modules (the gateway), not rebuilt from a stale copy. | Notebook cells P4-8, P4-9 |
 
 ### Verification
 
-None recorded yet (Phase 10).
+| Tag | Record | Where |
+|---|---|---|
+| V1 | First live run of the Phase 4 stack, 25 Sep 2026 (Colab, `openai/gpt-oss-120b`, fallback `openai/gpt-oss-20b`): "How many customers are there?" → `SELECT COUNT(*) … LIMIT 201` → 20, answered in 2 calls (571 + 58 and 183 + 56 tokens; 398 ms and 309 ms; one attempt each; no fallback). Groq returned `x-ratelimit-remaining-requests` (999 → 998, per day) and `x-ratelimit-remaining-tokens`, confirming the header names the limiter reads. The key did not appear in the call log. | Notebook cell P4-13 |
 
 ## Demo video
 

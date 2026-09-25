@@ -398,6 +398,23 @@ None of these was a real defect; each was a check written slightly wrong. The
 cells now use `git diff --name-only`/`--name-status`, stage only files that
 exist, and re-apply the venv `PATH` before committing.
 
+### Types caught what the tests could not
+
+Every test of the retry policy passed, and strict mypy still failed: tenacity's
+`stop_any` is typed to accept `stop_base` objects, and the "wait too long" rule
+was a plain function. It worked at runtime and would have kept working, until a
+tenacity release enforced its own types. A small `stop_base` subclass fixed it.
+Tests prove behaviour on today's versions; types prove the contract.
+
+### One real call settled an assumption about the provider
+
+The rate limiter reads Groq's rate-limit headers, and their names came from a
+secondary source. Before merging, one live question (two calls) confirmed them
+against a real response: `x-ratelimit-remaining-requests` went 999 → 998, which
+also confirmed it counts per day, and `x-ratelimit-remaining-tokens` fell between
+the calls. Without that check, the first real call would have happened in
+production.
+
 ---
 
 ## Known limitations
