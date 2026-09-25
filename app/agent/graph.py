@@ -1,4 +1,10 @@
-"""The LangGraph flow and the Agent that owns it (moved from app/agent.py in Phase 5)."""
+"""The LangGraph flow and the Agent that owns it (moved from app/agent.py in Phase 5).
+
+Flow: guard_input -> generate_sql -> classify_intent -> validate -> execute
+-> (retry once, if repairable) -> format_answer. A rejected question ends at
+guard_input with no model call; a refusal or a clarifying question ends at
+classify_intent. Node decisions live in app/agent/nodes/ as pure functions.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +15,8 @@ from typing import TYPE_CHECKING, Any
 from langgraph.graph import END, StateGraph
 
 from app.agent.llm import _add_usage, build_llm
+from app.agent.nodes.classify import Intent, classify_reply
+from app.agent.nodes.guard import guard_input
 from app.agent.replies import (
     LLM_ERROR_REPLIES,
     NO_USAGE,
@@ -24,7 +32,6 @@ from app.llm.registry import LlmRole
 from app.prompts import (
     ANSWER_PROMPT_ID,
     OUT_OF_SCOPE_TOKEN,
-    READ_ONLY_TOKEN,
     RETRY_PROMPT_ID,
     SQL_PROMPT_ID,
     build_answer_messages,
@@ -50,6 +57,17 @@ def _clean_sql(text):
 
 def _error_state(exc: SqlSafetyError) -> dict[str, Any]:
     return {"error": exc.code.value, "error_detail": exc.detail, "repairable": exc.repairable}
+
+
+def route_after_guard(state):
+    return "end" if state.get("blocked") else "generate_sql"
+
+
+def route_after_classify(state):
+    """Only SQL continues; refusals and clarifying questions are already answered."""
+    if state.get("out_of_scope") or state.get("needs_clarification"):
+        return "end"
+    return "validate"  # even an empty reply: the validator answers EMPTY_QUERY
 
 
 def route_after_execute(state):
@@ -97,20 +115,29 @@ class Agent:
 
     # --- nodes ----------------------------------------------------------
 
+    def guard(self, state):
+        """No model call: reject empty, oversized or non-text questions."""
+        rejection = guard_input(state.get("question"))
+        if rejection is None:
+            return {"blocked": False}
+        return {"blocked": True, "error": rejection.code, "answer": rejection.reply, "sql": None}
+
     def generate_sql(self, state):
-        """LLM call 1: question -> SQL, or a refusal token."""
+        """LLM call 1: question -> SQL, or a token (READ_ONLY, CLARIFY, OUT_OF_SCOPE)."""
         messages = build_sql_messages(state["question"], state.get("history"))
         raw, usage = self._complete(state, LlmRole.SQL_GENERATOR, messages, SQL_PROMPT_ID)
-        text = _clean_sql(raw)
+        return {"reply": _clean_sql(raw), "usage": usage}
 
-        # Specific before general: a write request gets the read-only reply.
-        if READ_ONLY_TOKEN in text.upper():
-            return {"out_of_scope": True, "sql": None, "answer": READ_ONLY_REPLY, "usage": usage}
-
-        if OUT_OF_SCOPE_TOKEN in text.upper():
-            return {"out_of_scope": True, "sql": None, "answer": OUT_OF_SCOPE_REPLY, "usage": usage}
-
-        return {"sql": text, "out_of_scope": False, "error": None, "usage": usage}
+    def classify(self, state):
+        """No model call: decide what the generator's reply is."""
+        result = classify_reply(state.get("reply", ""))
+        if result.intent is Intent.READ_ONLY:
+            return {"out_of_scope": True, "sql": None, "answer": READ_ONLY_REPLY}
+        if result.intent is Intent.OUT_OF_SCOPE:
+            return {"out_of_scope": True, "sql": None, "answer": OUT_OF_SCOPE_REPLY}
+        if result.intent is Intent.CLARIFY:
+            return {"needs_clarification": True, "sql": None, "answer": result.text}
+        return {"sql": result.text, "out_of_scope": False, "error": None}
 
     def validate(self, state):
         """Pure Python. No LLM, no database."""
@@ -205,14 +232,22 @@ class Agent:
     def _build_graph(self):
         g = StateGraph(AgentState)
 
+        g.add_node("guard_input", self.guard)
         g.add_node("generate_sql", self.generate_sql)
+        g.add_node("classify_intent", self.classify)
         g.add_node("validate", self.validate)
         g.add_node("execute", self.execute)
         g.add_node("retry", self.retry)
         g.add_node("format_answer", self.format_answer)
 
-        g.set_entry_point("generate_sql")
-        g.add_edge("generate_sql", "validate")
+        g.set_entry_point("guard_input")
+        g.add_conditional_edges(
+            "guard_input", route_after_guard, {"generate_sql": "generate_sql", "end": END}
+        )
+        g.add_edge("generate_sql", "classify_intent")
+        g.add_conditional_edges(
+            "classify_intent", route_after_classify, {"validate": "validate", "end": END}
+        )
         g.add_edge("validate", "execute")
         g.add_conditional_edges(
             "execute",
@@ -241,6 +276,8 @@ class Agent:
                     "retry_count": 0,
                     "request_id": request_id,
                     "usage": dict(NO_USAGE),
+                    "blocked": False,
+                    "needs_clarification": False,
                 }
             )
         except LlmError as exc:
@@ -254,6 +291,7 @@ class Agent:
                 "limit_reached": False,
                 "error": exc.code.value,
                 "out_of_scope": False,
+                "needs_clarification": False,
                 "request_id": request_id,
                 "usage": dict(NO_USAGE),
             }
@@ -268,6 +306,7 @@ class Agent:
             "limit_reached": final.get("limit_reached", False),
             "error": final.get("error"),
             "out_of_scope": final.get("out_of_scope", False),
+            "needs_clarification": final.get("needs_clarification", False),
             "request_id": request_id,
             "usage": final.get("usage", dict(NO_USAGE)),
         }

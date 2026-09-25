@@ -43,7 +43,7 @@ def test_loopback_is_still_allowed():
 
 def test_a04_leak_is_now_caught(offline_guard):
     """A-04 regression. With a real-looking key and no fake injected, the app
-    builds the real Groq stack, and a whitespace question used to reach Groq. The
+    builds the real Groq stack, and a real question reaches Groq. The
     app turns the failure into an LLM_UNAVAILABLE answer, so only the recorded attempt
     proves the guard saw it."""
     settings = load_settings(
@@ -55,7 +55,7 @@ def test_a04_leak_is_now_caught(offline_guard):
     )
     client = TestClient(create_app(settings))  # llm=None: the real Groq client
 
-    response = client.post("/chat", json={"question": "   "})
+    response = client.post("/chat", json={"question": "How many customers are there?"})
 
     assert response.json()["error"] == "LLM_UNAVAILABLE"  # was internal_error before Phase 4 (D23)
     assert offline_guard, "the Groq call must have been attempted and blocked"

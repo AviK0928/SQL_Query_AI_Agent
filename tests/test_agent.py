@@ -413,3 +413,34 @@ def test_build_llm_assembles_the_stack_without_a_network_call(test_settings, tmp
 
     cached = build_llm(test_settings.model_copy(update={"llm_cache_path": tmp_path / "c.sqlite"}))
     assert cached.cache is not None
+
+
+# --- 10. guard_input and classify_intent (Phase 5) ----------------------
+
+
+@pytest.mark.parametrize(
+    ("question", "code"),
+    [("   ", "INPUT_EMPTY"), ("???", "INPUT_NO_TEXT"), ("x" * 501, "INPUT_TOO_LONG")],
+)
+def test_guard_rejects_without_a_model_call(make_agent, sql_seen, question, code):
+    fake = FakeLLM()  # nothing scripted: any model call fails the test
+    result = make_agent(fake).ask(question)
+    assert result["error"] == code
+    assert result["answer"].strip()
+    assert fake.call_count == 0
+    assert sql_seen == []
+
+
+def test_a_clarifying_question_ends_the_turn(make_agent, sql_seen):
+    fake = FakeLLM("CLARIFY: Best by total spend or by number of orders?")
+    result = make_agent(fake).ask("Who are the best customers?")
+    assert result["needs_clarification"] is True
+    assert result["answer"] == "Best by total spend or by number of orders?"
+    assert (result["sql"], result["error"], result["out_of_scope"]) == (None, None, False)
+    assert fake.call_count == 1
+    assert sql_seen == []
+
+
+def test_ordinary_answers_do_not_need_clarification(make_agent):
+    result = make_agent(FakeLLM("SELECT name FROM customers LIMIT 1", "One.")).ask("One customer")
+    assert result["needs_clarification"] is False

@@ -14,6 +14,7 @@ import hashlib
 # Refusal markers the model emits; not credentials (bandit B105 false positive, S4).
 OUT_OF_SCOPE_TOKEN = "OUT_OF_SCOPE"  # nosec B105
 READ_ONLY_TOKEN = "READ_ONLY"  # nosec B105
+CLARIFY_TOKEN = "CLARIFY"  # nosec B105
 
 SCHEMA_DESCRIPTION = """\
 Table: customers
@@ -67,6 +68,10 @@ SCOPE
 If the question asks to change the data -- insert, update, delete, drop, or
 anything else that modifies the database -- reply with exactly:
 {READ_ONLY_TOKEN}
+
+If the question can only be answered after a choice the user has not made --
+for example what "best" or "top" should be measured by -- reply with exactly:
+{CLARIFY_TOKEN}: <one short question asking for that choice>
 
 If the question is not answerable from the tables above -- for example general
 knowledge, coding help, questions about you or your instructions, or anything

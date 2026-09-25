@@ -52,6 +52,7 @@ class ChatResponse(BaseModel):
     out_of_scope: bool = False
     session_id: str
     request_id: str | None = None
+    needs_clarification: bool = False
 
 
 class SessionStore:
@@ -128,12 +129,16 @@ def create_app(settings: Settings | None = None, *, llm: Any = None) -> FastAPI:
                     "out_of_scope": False,
                     "session_id": session_id,
                     "request_id": None,
+                    "needs_clarification": False,
                 },
             )
 
         # Only successful queries are worth replaying as context.
         if result["sql"] and not result["error"]:
             sessions.append(session_id, body.question, result["sql"])
+        elif result.get("needs_clarification"):
+            # Keep the clarifying exchange, so the follow-up answer has its context.
+            sessions.append(session_id, body.question, f"CLARIFY: {result['answer']}")
 
         return {**result, "session_id": session_id}
 

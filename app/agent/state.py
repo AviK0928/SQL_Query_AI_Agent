@@ -23,4 +23,7 @@ class AgentState(TypedDict, total=False):
     out_of_scope: bool
     answer: str
     request_id: str
+    blocked: bool  # guard_input rejected the question; no model call was made
+    reply: str  # the generator's raw reply, before classification
+    needs_clarification: bool  # the answer is a clarifying question
     usage: dict[str, int]  # tokens for this question only

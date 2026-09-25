@@ -26,3 +26,11 @@ LLM_ERROR_REPLIES = {
 SUMMARY_UNAVAILABLE_REPLY = "Here are the results; a summary couldn't be generated right now."
 
 NO_USAGE = {"calls": 0, "cache_hits": 0, "input_tokens": 0, "output_tokens": 0}
+
+# guard_input (Phase 5): questions rejected before any model call.
+EMPTY_QUESTION_REPLY = "Please type a question about the customers, products or orders data."
+NO_TEXT_REPLY = "That doesn't look like a question. Try asking about customers, products or orders."
+TOO_LONG_REPLY = "That question is too long. Please shorten it to under 500 characters."
+
+# classify_intent (Phase 5): used when the model asks to clarify but gives no question.
+CLARIFY_FALLBACK = "Could you say a bit more about what you mean, so I pick the right data?"
