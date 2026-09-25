@@ -153,7 +153,7 @@ prints its value (S3). Environment variables override `.env`.
 pytest -q
 ```
 
-**354 tests (T9), no API key needed, no network calls.** The language model is
+**414 tests (T10), no API key needed, no network calls.** The language model is
 replaced by a scripted fake. The suite is offline by construction, not by
 convention: a guard in `tests/conftest.py` removes every setting from the
 environment and blocks and records any non-loopback network attempt, failing
@@ -198,7 +198,7 @@ modify data — gets a polite refusal.
 |---|---|---|
 | `GET` | `/health` | `{"status": "ok"}` |
 | `GET` | `/schema` | Table and column names |
-| `POST` | `/chat` | `answer`, `sql`, `columns`, `rows`, `truncated`, `limit_reached`, `error`, `out_of_scope`, `session_id`, `request_id` |
+| `POST` | `/chat` | `answer`, `sql`, `columns`, `rows`, `truncated`, `limit_reached`, `error`, `out_of_scope`, `session_id`, `request_id`, `needs_clarification` |
 | `GET` | `/` | The frontend |
 
 `POST /chat` takes `{"question": "...", "session_id": "..."}`. The session id is
@@ -209,7 +209,9 @@ Failed queries return HTTP 200 with `error` set to an error code such as
 `EXECUTION_ERROR` or `FORBIDDEN_WRITE` (`app/sql/errors.py`), or an `LLM_*` code
 such as `LLM_RATE_LIMITED` (`app/llm/client.py`), never database or provider
 text (H1), so the frontend has one response shape to handle. `request_id` ties a
-response to its LLM call-log lines (H3). Malformed requests return 422.
+response to its LLM call-log lines (H3). Rejected input returns `INPUT_EMPTY`,
+`INPUT_TOO_LONG` or `INPUT_NO_TEXT` without a model call, and `needs_clarification`
+marks an answer that is a clarifying question (D27, D28). Malformed requests return 422.
 
 ## Deployment
 
@@ -282,6 +284,11 @@ recovered and are listed as such rather than invented.
 | D23 | Model calls go through one stack built from `Settings`: the Groq SDK transport (SDK retries off) → `LlmClient` (per-model rate limiter; tenacity retries on 429, 5xx and timeouts, honouring `retry-after` up to `LLM_MAX_WAIT_S`; fallback to `GROQ_FALLBACK_MODEL` on a persistent 429 or a retired model) → `LlmGateway` (cache when `LLM_CACHE_PATH` is set, call log, usage). Nodes call by role (`sql_generator`, `sql_repair`, `synthesizer`) with a request id per question. A failure during generation or repair returns a fixed answer with an `LLM_*` code and no SQL; a failure during the summary keeps the rows. The API gains `request_id`; `internal_error` remains only for unexpected faults, so the A-04 guard test now expects `LLM_UNAVAILABLE`. `langchain-groq` was removed. | `app/llm/`, `app/agent.py`, `app/main.py` |
 | D24 | Each prompt has an id derived from its text (`name@` + 8 hex characters of a SHA-256), sent with every model call: any edit changes the id, which invalidates cached answers and shows in every call-log line which prompt text was used. Phase 7 replaces this with versioned prompt files. At Phase 4: `sql_gen@27e9e81d`, `sql_repair@a5c30252`, `answer@3c3a3566`. | `app/prompts.py`, `tests/unit/test_prompt_ids.py` |
 | D25 | `groq==0.37.1` and `tenacity==9.1.4` are direct, exact pins (D13), because the client imports them. tenacity's typed `stop_any` accepts only `stop_base` instances, so the "retry-after longer than the maximum wait" stop is a small `stop_base` subclass; strict mypy caught this, while every test passed. | `pyproject.toml`, `app/llm/client.py` |
+| D26 | The agent is a package (`app/agent/`): `graph.py` wires LangGraph, `state.py` types the state, and each node's decision is a pure function in `app/agent/nodes/` (guard, classify, check), testable without a model, database or graph. Flow: `guard_input → generate_sql → classify_intent → validate → execute → (repair) → format_answer → check_answer`. Deviation from the planned order, on purpose: classification reads the generator's reply instead of making its own model call, so one call does both and the two can never disagree. `load_relevant_schema` is deferred: with four tables, table selection saves few tokens and risks dropping a needed table; it is added when the schema grows. | `app/agent/` |
+| D27 | Ambiguous questions get a clarifying question: the SQL prompt tells the model to reply `CLARIFY: <question>` when an answer needs a choice the user has not made (for example what "best" is measured by). The response sets `needs_clarification`, and the exchange is kept in the session history so the user's follow-up has its context. Measured before keeping it (PROMPTS.md). | `app/prompts.py`, `app/agent/nodes/classify.py`, `app/main.py` |
+| D28 | `guard_input` rejects empty, over-500-character and letterless questions with `INPUT_EMPTY`, `INPUT_TOO_LONG` or `INPUT_NO_TEXT` before any model call, so they cost no Groq request. | `app/agent/nodes/guard.py` |
+| D29 | `check_answer` makes honest disclosure guaranteed rather than requested: when a result is empty, capped or limited and the answer does not say so, a fixed sentence is appended. Numbers in the answer that cannot be traced to the rows, the row count or the question are recorded as `UNSUPPORTED_NUMBERS` in `answer_checks` but not rewritten, since derived figures would cause false alarms. Text is compared after NFKC normalisation with Indian digit grouping handled. No model call. | `app/agent/nodes/check.py` |
+| D30 | `MAX_REPAIR_ATTEMPTS` (0–3, default 1: the previous behaviour) sets how many times a repairable error is sent back to the model. Each repair increments `retry_count`, and routing stops at the setting, so the loop is bounded by construction. Raising it costs one call per extra repair; Phase 6 decides with evidence. | `app/config.py`, `app/agent/graph.py` |
 
 ### Limitations
 
@@ -293,6 +300,8 @@ recovered and are listed as such rather than invented.
 | L5 | Prompt rule 3 still asks the model for `LIMIT 100`, below the 200-row cap. Such a result is not truncated by code but may be incomplete; this is disclosed through `limit_reached` (D19). Removing the rule is a prompt change, so it waits for Phase 7 evals. | `app/prompts.py` |
 | L6 | The frontend's truncation note hard-codes "capped at 200". It matches the `MAX_ROWS` default but does not follow the setting. | `frontend/app.js` |
 | L7 | The rate limiter's daily counters live in memory, so a restart forgets how much of the day's quota was used. Groq's `x-ratelimit-remaining-requests` header re-syncs the request count on the next call. The cache and call-log files are not rotated. | `app/llm/limiter.py`, `app/llm/calllog.py` |
+| L8 | The Phase 0 baseline grader credits only the `truncated` flag, so b13 (the model's own `LIMIT 100` cutting a 300-row result) still fails although the system now flags it as `limit_reached` and discloses it; and no deterministic check can catch b14's wording error ("three customers" for 3 orders). The grader is left unchanged to keep runs comparable; Phase 6's harness and judge address both. | `evals/baseline/run_baseline.py` |
+| L9 | `UNSUPPORTED_NUMBERS` can flag legitimately derived figures (percentages, differences), so it is a signal for evals and logs, not a verdict, and it never changes the answer text. | `app/agent/nodes/check.py` |
 
 ### Security
 
@@ -318,6 +327,7 @@ recovered and are listed as such rather than invented.
 | T7 | Mutation testing (mutmut 3.8, manual, 25 Sep 2026) on `app/sql/validator.py` and `app/sql/executor.py` against `tests/unit`: 394 mutants, 324 killed + 3 timeouts = 83.0%. The first run left 116 survivors; the real gaps were closed with 14 tests and one guard (D20). All 67 remaining survivors are classified: 12 unreachable by the tool (`_classes` runs at import), 19 equivalent (listed in DISCOVERIES), 36 message wording (policy: tests pin the information a message carries, not its phrasing). Excluding the 31 unkillable: 327/363 = 90.1%. | `pyproject.toml` `[tool.mutmut]` |
 | T8 | The offline guard derives the list of environment variables it clears from `Settings` itself, so a newly added setting can never leak from the host environment into a test. | `tests/conftest.py`, `tests/test_config.py` |
 | T9 | 354 tests collected and passing at `3b2ff78`, 25 Sep 2026 (226 before Phase 4); `app/llm` at 100% line and branch coverage. Every resilience path (429 bursts, `retry-after`, over-long waits, retired models, timeouts, 5xx, daily budgets, header feedback) is tested against a scripted transport and a fake clock, so no test waits or touches the network. The A-04 guard test now expects `LLM_UNAVAILABLE` and makes one attempt. The schema-hash method changed: `207e7a26b02f` replaces Phase 0's `cace08063546` as the baseline; the schema itself did not change. | `tests/unit/test_llm_*.py`, `tests/test_offline_guard.py` |
+| T10 | 414 tests at Phase 5 (354 before); every node decision has unit tests with plain inputs. The package move changed no test (354 → 354, proving it behaviour-neutral). The Phase 0 baseline was re-run three times with the unchanged grader: before Phase 5 11/15, after the `CLARIFY` rule 12/15, final 12/15 (11/14 graded automatically, b08 by review). | `tests/`, `evals/baseline/results/` |
 
 ### Data handling
 
@@ -342,6 +352,7 @@ recovered and are listed as such rather than invented.
 | P13 | Three notebook-cell bugs made a correct state look wrong: `.strip()` on multi-line `git status --porcelain` cut the first line's status column; `git add` with a path already removed by `git rm` is a hard error; and a kernel restart drops `PATH` changes made by Cell 7, so the pre-commit mypy hook could not find `mypy`. Rules since: use `git diff --name-only`/`--name-status`; stage only files that exist; cells that commit re-apply the venv `PATH`. Separately, merging `main` back into the branch for #18 conflicted on `.gitignore`; the resolution kept `main`'s version and dropped `mutants/`. It was found by comparing the last verified commit (not the PR head, which was the unverified conflict-resolution merge) with `main`, and restored by #19. | Notebook cells P3-12, P3-23, P3-24, P3-35b, P3-36 |
 | P14 | A recycled VM loses the git identity (it is repo-local config), and a finished step once stopped at `git commit` with its files left uncommitted. Commit cells now check the identity before doing any work. Separately, the assistant's local copy of `client.py` drifted from the repo, so changes to files already edited in Colab are delivered as anchored edits or new modules (the gateway), not rebuilt from a stale copy. | Notebook cells P4-8, P4-9 |
 | P15 | PR titles are enforced by CI: the `pr-title` workflow fails any pull request whose title is not a conventional commit of at most 72 characters, and it re-runs when the title is edited. Added after #16, #17, #18 and #20 merged with GitHub's default branch-name titles despite P12's written rule; a rule a person must remember failed four times, a required check cannot be skipped. The title reaches the script through an environment variable, never inlined into it, so a crafted title cannot inject commands. | `.github/workflows/pr-title.yml`, branch protection |
+| P16 | Three checks fixed in Phase 5: git's rename detection reported `app/agent.py → app/agent/graph.py` as `R066`, so staged-set checks use `--no-renames`; the edit helper now rejects any new Python line over 100 characters before writing; and the baseline runner gained `--tag`, because re-running with an unchanged prompt hash would otherwise find Phase 0's file and skip every item. | Notebook cells P5-2, P5-9, P5-5 |
 
 ### Verification
 
@@ -349,6 +360,7 @@ recovered and are listed as such rather than invented.
 |---|---|---|
 | V1 | First live run of the Phase 4 stack, 25 Sep 2026 (Colab, `openai/gpt-oss-120b`, fallback `openai/gpt-oss-20b`): "How many customers are there?" → `SELECT COUNT(*) … LIMIT 201` → 20, answered in 2 calls (571 + 58 and 183 + 56 tokens; 398 ms and 309 ms; one attempt each; no fallback). Groq returned `x-ratelimit-remaining-requests` (999 → 998, per day) and `x-ratelimit-remaining-tokens`, confirming the header names the limiter reads. The key did not appear in the call log. | Notebook cell P4-13 |
 | V2 | Production after the Phase 4 merge (#20), 25 Sep 2026: `main` identical to the verified commit `cd7ae7d`; Render `/health` 200 on the first attempt; `POST /chat` "How many customers are there?" → 20 with `error: null` and a `request_id`. The `request_id` field exists only in Phase 4 code, so this proves the new build was live and that `LLM_LIMITS` was read on Render. | Notebook cell P4-15 |
+| V3 | Phase 5 final baseline, 25 Sep 2026 (`openai/gpt-oss-120b`, temperature 0, same 15 items and grader as Phase 0): 11/14 graded automatically; b08 answered with a clarifying question: "Do you want best customers by total revenue, order count, or average order value?"; total 12/15 against Phase 0's 11/15; 28 calls, 13,127 input tokens. | `evals/baseline/results/baseline_a77a6f5a5597_openai_gpt-oss-120b_phase5-final.jsonl` |
 
 ## Demo video
 

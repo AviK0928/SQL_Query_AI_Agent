@@ -415,6 +415,16 @@ also confirmed it counts per day, and `x-ratelimit-remaining-tokens` fell betwee
 the calls. Without that check, the first real call would have happened in
 production.
 
+### A grader can hide an improvement
+
+After Phase 3 the code knew that baseline item b13 was partial: the model's own
+`LIMIT 100` had cut a 300-row result, and the result carried `limit_reached`.
+The Phase 0 grader still failed it, because it only credits the `truncated`
+flag. Updating the grader would have turned b13 into a pass and made the
+numbers look better, while silently breaking the comparison with every earlier
+run. The grader stayed frozen; the gap is recorded (README L8) and handled by
+the Phase 6 harness, where the new grading is measured on its own.
+
 ---
 
 ## Known limitations
