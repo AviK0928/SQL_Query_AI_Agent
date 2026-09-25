@@ -20,7 +20,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from tenacity import (
     RetryCallState,
@@ -33,6 +33,9 @@ from tenacity import (
 from tenacity.stop import stop_base
 
 from app.llm.registry import LlmRole, ModelRegistry
+
+if TYPE_CHECKING:  # type hints only: limiter.py imports this module's errors
+    from app.llm.limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +187,20 @@ def build_groq_transport(api_key: str, timeout_s: float) -> Transport:
     return groq_transport(Groq(api_key=api_key, max_retries=0, timeout=timeout_s))
 
 
+# Assumed completion size when a call sets no max_tokens (measured and tuned in Phase 6).
+DEFAULT_COMPLETION_TOKENS = 512
+
+
+def estimate_tokens(messages: Sequence[Message], max_tokens: int | None) -> int:
+    """Rough pre-call estimate: about 4 characters per token, plus the completion budget.
+
+    Used only to reserve rate-limit capacity; the real usage corrects it afterwards.
+    """
+    chars = sum(len(m.get("content", "")) for m in messages)
+    budget = max_tokens if max_tokens is not None else DEFAULT_COMPLETION_TOKENS
+    return chars // 4 + budget
+
+
 # --- client ------------------------------------------------------------------
 
 
@@ -211,6 +228,7 @@ class LlmClient:
         max_attempts: int,
         max_wait_s: float,
         max_backoff_s: float = 8.0,
+        limiter: RateLimiter | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -219,6 +237,7 @@ class LlmClient:
         self.max_attempts = max_attempts
         self.max_wait_s = max_wait_s
         self.max_backoff_s = max_backoff_s
+        self.limiter = limiter
         self.sleep = sleep
         self.clock = clock
         self._backoff = wait_exponential_jitter(initial=0.5, max=max_backoff_s)
@@ -280,9 +299,23 @@ class LlmClient:
         max_tokens: int | None,
         counter: list[int],
     ) -> RawCompletion:
+        estimate = estimate_tokens(messages, max_tokens)
+
         def attempt() -> RawCompletion:
-            counter[0] += 1
-            return self.transport(model, messages, temperature, max_tokens)
+            if self.limiter is not None:
+                # May sleep; raises RateLimitedError locally when the wait is too long.
+                self.limiter.acquire(model, estimate)
+            counter[0] += 1  # counts network calls only
+            try:
+                raw = self.transport(model, messages, temperature, max_tokens)
+            except RateLimitedError as exc:
+                if self.limiter is not None:
+                    self.limiter.on_rate_limited(model, exc.retry_after)
+                raise
+            if self.limiter is not None:
+                actual = raw.input_tokens + raw.output_tokens
+                self.limiter.record(model, estimate, actual, raw.headers)
+            return raw
 
         retrying = Retrying(
             retry=retry_if_exception_type(RETRYABLE),
