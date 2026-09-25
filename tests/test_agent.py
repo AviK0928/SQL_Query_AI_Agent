@@ -8,8 +8,10 @@ the validator runs, the graph routes, and queries hit the actual SQLite file.
 
 import pytest
 
-from app.agent import Agent
-from app.db import Database
+from app.agent import READ_ONLY_REPLY, Agent
+from app.config import load_settings
+from app.sql.errors import USER_MESSAGES, SqlErrorCode
+from app.sql.executor import ReadOnlyExecutor
 from tests.fakes import FakeLLM
 
 
@@ -17,8 +19,16 @@ from tests.fakes import FakeLLM
 def make_agent(test_settings):
     """Builds an Agent around a scripted FakeLLM. No module globals to reset."""
 
-    def build(fake):
-        return Agent(test_settings, llm=fake)
+    def build(fake, **overrides):
+        settings = test_settings
+        if overrides:
+            settings = load_settings(
+                env_file=None,
+                groq_api_key="test-key-not-real",
+                groq_model="fake/test-model",
+                **overrides,
+            )
+        return Agent(settings, llm=fake)
 
     return build
 
@@ -27,13 +37,13 @@ def make_agent(test_settings):
 def sql_seen(monkeypatch):
     """Records every SQL string that reaches the database, then calls through."""
     seen = []
-    real = Database.run_query
+    real = ReadOnlyExecutor.execute
 
-    def spy(self, sql):
-        seen.append(sql)
-        return real(self, sql)
+    def spy(self, query):
+        seen.append(query.sql)
+        return real(self, query)
 
-    monkeypatch.setattr(Database, "run_query", spy)
+    monkeypatch.setattr(ReadOnlyExecutor, "execute", spy)
     return seen
 
 
@@ -56,6 +66,17 @@ def test_happy_path_generates_sql_and_answers(make_agent):
     assert result["columns"] == ["name", "city"]
     assert result["answer"].strip()
     assert fake.call_count == 2, "generate + format_answer, no retry"
+
+
+def test_sql_returned_is_the_sql_that_ran(make_agent, sql_seen):
+    """The row cap is code-owned: a query without LIMIT runs with cap + 1."""
+    fake = FakeLLM("SELECT name FROM customers", "All customers.")
+    bot = make_agent(fake)
+
+    result = bot.ask("List customers")
+
+    assert result["sql"] == "SELECT name FROM customers LIMIT 201"
+    assert sql_seen == [result["sql"]]
 
 
 # --- 2. out of scope ----------------------------------------------------
@@ -122,6 +143,37 @@ def test_retry_receives_the_database_error(make_agent):
     assert any("no such column: revenue" in m["content"] for m in retry_messages)
 
 
+def test_unknown_table_is_repaired(make_agent):
+    fake = FakeLLM(
+        "SELECT name FROM buyers",  # schema-name mismatch: users say buyers
+        "SELECT name FROM customers LIMIT 2",
+        "Two customers.",
+    )
+    bot = make_agent(fake)
+
+    result = bot.ask("Show two buyers")
+
+    assert result["error"] is None
+    assert any("Available tables" in m["content"] for m in fake.calls[1])
+    assert fake.call_count == 3
+
+
+def test_retry_can_decline_as_out_of_scope(make_agent):
+    fake = FakeLLM(
+        "SELECT revenue FROM customers",  # fails: no such column
+        "OUT_OF_SCOPE",  # the retry concludes the schema cannot answer it
+    )
+    bot = make_agent(fake)
+
+    result = bot.ask("Show me revenue")
+
+    assert result["out_of_scope"] is True
+    assert result["error"] is None
+    assert result["sql"] is None
+    assert "e-commerce database" in result["answer"]
+    assert fake.call_count == 2, "generate + retry; no answer-formatting call"
+
+
 # --- 4. retry exhausted -------------------------------------------------
 
 
@@ -134,42 +186,86 @@ def test_retry_exhausted_returns_error_without_a_third_call(make_agent):
 
     result = bot.ask("Show me revenue")
 
-    assert result["error"] is not None
+    assert result["error"] == SqlErrorCode.EXECUTION_ERROR
     assert "couldn't run a query" in result["answer"]
+    assert "no such column" not in result["answer"], "database text must not reach users"
     assert fake.call_count == 2, "one retry only; no LLM call to format an error"
 
 
-# --- 5. dangerous SQL ---------------------------------------------------
+# --- 5. dangerous SQL: final, never retried ------------------------------
 
 
 def test_dangerous_sql_never_reaches_the_database(make_agent, sql_seen):
+    """Worst case: the model complies. The write is rejected and not retried."""
     fake = FakeLLM(
         "DROP TABLE customers",
-        "SELECT name FROM customers LIMIT 2",
-        "Two customers.",
+        "SELECT name FROM customers LIMIT 2",  # must never be requested
     )
     bot = make_agent(fake)
 
     result = bot.ask("Delete all customers")
 
-    assert all("DROP" not in sql.upper() for sql in sql_seen)
-    assert result["sql"] == "SELECT name FROM customers LIMIT 2"
-    assert result["error"] is None
+    assert sql_seen == []
+    assert result["error"] == SqlErrorCode.FORBIDDEN_WRITE
+    assert result["answer"] == READ_ONLY_REPLY
+    assert result["sql"] is None, "rejected SQL is never presented as the query that ran"
+    assert fake.call_count == 1, "a forbidden write earns no retry"
 
 
-def test_stacked_statements_are_rejected_by_the_validator(make_agent, sql_seen):
+def test_stacked_statements_are_rejected_without_retry(make_agent, sql_seen):
     fake = FakeLLM(
         "SELECT 1; DROP TABLE customers",
-        "SELECT name FROM customers LIMIT 1",
-        "One customer.",
+        "SELECT name FROM customers LIMIT 1",  # must never be requested
     )
     bot = make_agent(fake)
-    bot.ask("Show a customer")
 
-    assert all(";" not in sql for sql in sql_seen)
+    result = bot.ask("Show a customer")
+
+    assert sql_seen == []
+    assert result["error"] == SqlErrorCode.MULTIPLE_STATEMENTS
+    assert fake.call_count == 1
 
 
-# --- 6. markdown fences -------------------------------------------------
+def test_timeout_is_final_and_not_retried(make_agent):
+    fake = FakeLLM(
+        "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT COUNT(*) FROM c",
+        "SELECT 1",  # must never be requested
+    )
+    bot = make_agent(fake, query_timeout_s=0.2)
+
+    result = bot.ask("Count forever")
+
+    assert result["error"] == SqlErrorCode.TIMEOUT
+    assert result["answer"] == USER_MESSAGES[SqlErrorCode.TIMEOUT]
+    assert fake.call_count == 1
+
+
+# --- 6. honest partial results ------------------------------------------
+
+
+def test_truncation_flows_through(make_agent):
+    fake = FakeLLM("SELECT id FROM customers ORDER BY id", "Two customers shown.")
+    bot = make_agent(fake, max_rows=2)
+
+    result = bot.ask("List customer ids")
+
+    assert result["truncated"] is True
+    assert len(result["rows"]) == 2
+    assert "truncated" in fake.calls[1][-1]["content"]
+
+
+def test_limit_reached_flows_through_to_the_answer_prompt(make_agent):
+    fake = FakeLLM("SELECT name FROM customers ORDER BY id LIMIT 3", "Three customers.")
+    bot = make_agent(fake)
+
+    result = bot.ask("Some customers")
+
+    assert result["limit_reached"] is True
+    assert result["truncated"] is False
+    assert "LIMIT was reached" in fake.calls[1][-1]["content"]
+
+
+# --- 7. markdown fences -------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -190,7 +286,7 @@ def test_markdown_fences_and_whitespace_are_stripped(make_agent, raw):
     assert result["error"] is None
 
 
-# --- 7. conversation history --------------------------------------------
+# --- 8. conversation history --------------------------------------------
 
 
 def test_history_is_replayed_to_the_model(make_agent):

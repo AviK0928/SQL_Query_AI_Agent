@@ -89,6 +89,14 @@ def test_answer_messages_flag_truncation():
     assert "truncated" in m[-1]["content"]
 
 
+def test_answer_messages_flag_truncation_even_when_rows_are_hidden():
+    """Both notes are needed: 20 of 30 rows shown, and the 30 were themselves capped."""
+    m = build_answer_messages("List all", ["id"], [[i] for i in range(30)], truncated=True)
+    content = m[-1]["content"]
+    assert "first 20 of 30" in content
+    assert "truncated" in content
+
+
 def test_answer_messages_warn_when_rows_are_hidden():
     """A partial view must be labelled, or the model reports the max of what it sees."""
     m = build_answer_messages("latest expenditures", ["id"], [[i] for i in range(30)])
@@ -99,7 +107,15 @@ def test_answer_messages_warn_when_rows_are_hidden():
 
 def test_answer_messages_no_warning_when_all_rows_shown():
     m = build_answer_messages("a few rows", ["id"], [[i] for i in range(5)])
-    assert "showing the first" not in m[-1]["content"]
+    content = m[-1]["content"]
+    assert "showing the first" not in content
+    assert "truncated" not in content
+    assert "LIMIT was reached" not in content
+
+
+def test_answer_messages_flag_limit_reached():
+    m = build_answer_messages("some rows", ["id"], [[i] for i in range(3)], limit_reached=True)
+    assert "LIMIT was reached" in m[-1]["content"]
 
 
 def test_answer_messages_cap_rows_sent_to_llm():

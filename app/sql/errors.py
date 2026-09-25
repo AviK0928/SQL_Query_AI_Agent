@@ -48,7 +48,7 @@ REPAIRABLE_CODES: frozenset[SqlErrorCode] = frozenset(
     }
 )
 
-_GENERIC = "I couldn't build a valid query for that question. Try rephrasing it."
+_GENERIC = "I couldn't run a query for that question. Try rephrasing it."
 
 USER_MESSAGES: dict[SqlErrorCode, str] = {
     SqlErrorCode.EMPTY_QUERY: _GENERIC,

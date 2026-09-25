@@ -212,6 +212,40 @@ def test_parse_result_that_is_not_an_expression_is_rejected(monkeypatch):
     assert rejected("SELECT 1").code == C.NOT_A_SELECT
 
 
+def test_deeply_nested_sql_is_a_parse_error_not_a_crash():
+    error = rejected("SELECT " + "(" * 1500 + "1" + ")" * 1500)
+    assert error.code == C.PARSE_ERROR
+    assert "nested too deeply" in error.detail
+
+
+def test_bare_select_is_an_incomplete_query():
+    # Found by the totality property test: sqlglot parses a bare SELECT and the
+    # validator used to regenerate it as "SELECT LIMIT 201", which is not SQL.
+    error = rejected("SELECT")
+    assert error.code == C.PARSE_ERROR
+    assert error.repairable
+
+
+def test_tokenizer_error_is_a_parse_error():
+    error = rejected("SELECT 'abc")
+    assert error.code == C.PARSE_ERROR
+    assert "\x1b" not in error.detail
+
+
+@pytest.mark.parametrize("sql", ["DESCRIBE customers", "USE main", "SET x = 1", "SHOW TABLES"])
+def test_other_statement_roots_are_forbidden(sql):
+    error = rejected(sql)
+    assert error.code == C.FORBIDDEN_STATEMENT
+    assert not error.repairable
+
+
+@pytest.mark.parametrize("sql", ["VALUES (1, 2)", "hello"])
+def test_non_query_expressions_are_not_a_select(sql):
+    error = rejected(sql)
+    assert error.code == C.NOT_A_SELECT
+    assert not error.repairable
+
+
 # --- tables ---------------------------------------------------------------
 
 
@@ -252,6 +286,10 @@ def test_unknown_table_detail_lists_available_tables():
 )
 def test_dangerous_functions_are_rejected(sql):
     assert rejected(sql).code == C.FORBIDDEN_FUNCTION
+
+
+def test_table_valued_function_in_from_is_rejected():
+    assert rejected("SELECT * FROM json_each('[1,2]')").code == C.FORBIDDEN_FUNCTION
 
 
 def test_ordinary_functions_are_allowed():

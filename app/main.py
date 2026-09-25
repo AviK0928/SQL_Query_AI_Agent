@@ -2,13 +2,14 @@
 
 Errors are returned as HTTP 200 with a populated field rather than as HTTP
 error codes, so the frontend has one response shape to handle. A failed query
-is a normal outcome of this application, not a transport failure.
+is a normal outcome of this application, not a transport failure. The `error`
+field carries an error code (see app/sql/errors.py), never database text.
 
 The app is built by create_app(settings, llm=None). Settings are validated
 before anything else is constructed, so a missing GROQ_API_KEY or GROQ_MODEL
 stops startup with a ConfigError instead of failing on the first request.
-Spring comparison: create_app is the @Configuration class; Agent, Database
-and SessionStore are the beans it wires together.
+Spring comparison: create_app is the @Configuration class; Agent, Database,
+ReadOnlyExecutor and SessionStore are the beans it wires together.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ class ChatResponse(BaseModel):
     columns: list = []
     rows: list = []
     truncated: bool = False
+    limit_reached: bool = False
     error: str | None = None
     out_of_scope: bool = False
     session_id: str
@@ -118,6 +120,7 @@ def create_app(settings: Settings | None = None, *, llm: Any = None) -> FastAPI:
                     "columns": [],
                     "rows": [],
                     "truncated": False,
+                    "limit_reached": False,
                     "error": "internal_error",
                     "out_of_scope": False,
                     "session_id": session_id,
