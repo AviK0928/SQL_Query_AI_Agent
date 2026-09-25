@@ -27,4 +27,5 @@ class AgentState(TypedDict, total=False):
     reply: str  # the generator's raw reply, before classification
     needs_clarification: bool  # the answer is a clarifying question
     max_repairs: int  # MAX_REPAIR_ATTEMPTS for this question
+    answer_checks: list[str]  # check_answer findings (empty when all checks pass)
     usage: dict[str, int]  # tokens for this question only

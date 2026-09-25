@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from langgraph.graph import END, StateGraph
 
 from app.agent.llm import _add_usage, build_llm
+from app.agent.nodes.check import check_answer
 from app.agent.nodes.classify import Intent, classify_reply
 from app.agent.nodes.guard import guard_input
 from app.agent.replies import (
@@ -232,6 +233,19 @@ class Agent:
             return {"answer": SUMMARY_UNAVAILABLE_REPLY, "error": exc.code.value}
         return {"answer": text.strip(), "usage": usage}
 
+    def check(self, state):
+        """No model call: guarantee honest disclosure; record unsupported numbers."""
+        if state.get("error") or state.get("out_of_scope") or not state.get("answer"):
+            return {"answer_checks": []}
+        result = check_answer(
+            state["answer"],
+            state.get("rows", []),
+            question=state.get("question", ""),
+            truncated=state.get("truncated", False),
+            limit_reached=state.get("limit_reached", False),
+        )
+        return {"answer": result.answer, "answer_checks": list(result.findings)}
+
     # --- graph ----------------------------------------------------------
 
     def _build_graph(self):
@@ -260,7 +274,9 @@ class Agent:
             {"retry": "retry", "answer": "format_answer"},
         )
         g.add_edge("retry", "validate")  # retried SQL is re-validated
-        g.add_edge("format_answer", END)
+        g.add_node("check_answer", self.check)
+        g.add_edge("format_answer", "check_answer")
+        g.add_edge("check_answer", END)
 
         return g.compile()
 
@@ -298,6 +314,7 @@ class Agent:
                 "error": exc.code.value,
                 "out_of_scope": False,
                 "needs_clarification": False,
+                "answer_checks": [],
                 "request_id": request_id,
                 "usage": dict(NO_USAGE),
             }
@@ -313,6 +330,7 @@ class Agent:
             "error": final.get("error"),
             "out_of_scope": final.get("out_of_scope", False),
             "needs_clarification": final.get("needs_clarification", False),
+            "answer_checks": final.get("answer_checks", []),
             "request_id": request_id,
             "usage": final.get("usage", dict(NO_USAGE)),
         }

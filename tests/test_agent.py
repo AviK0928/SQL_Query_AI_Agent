@@ -472,3 +472,31 @@ def test_a_second_repair_can_succeed(make_agent):
     assert result["error"] is None
     assert len(result["rows"]) == 2
     assert fake.roles.count(LlmRole.SQL_REPAIR) == 2
+
+
+# --- 12. check_answer (Phase 5) -------------------------------------------
+
+
+def test_check_answer_appends_a_missing_truncation_disclosure(make_agent):
+    fake = FakeLLM("SELECT id FROM customers ORDER BY id", "Two customers shown.")
+    result = make_agent(fake, max_rows=2).ask("List customer ids")
+    assert result["answer"].startswith("Two customers shown. Only the first 2 rows")
+    assert result["answer_checks"] == ["TRUNCATION_UNDISCLOSED"]
+
+
+def test_check_answer_leaves_an_honest_answer_alone(make_agent):
+    fake = FakeLLM("SELECT name FROM customers WHERE city = 'Goa'", "No customers live in Goa.")
+    result = make_agent(fake).ask("Customers in Goa?")
+    assert result["answer"] == "No customers live in Goa."
+    assert result["answer_checks"] == []
+
+
+def test_check_answer_flags_numbers_not_in_the_rows(make_agent):
+    fake = FakeLLM("SELECT COUNT(*) FROM customers", "There are 999 customers.")
+    result = make_agent(fake).ask("How many customers?")
+    assert result["answer"] == "There are 999 customers."
+    assert "UNSUPPORTED_NUMBERS" in result["answer_checks"]
+
+
+def test_check_answer_skips_refusals(make_agent):
+    assert make_agent(FakeLLM("OUT_OF_SCOPE")).ask("Write Python")["answer_checks"] == []
