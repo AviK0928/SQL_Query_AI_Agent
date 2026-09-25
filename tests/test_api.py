@@ -8,6 +8,7 @@ No API key is required to run this file."""
 import pytest
 from fastapi.testclient import TestClient
 
+from app.llm.client import LlmError, LlmErrorCode
 from app.main import create_app
 from tests.fakes import FakeLLM
 
@@ -115,6 +116,7 @@ def test_chat_response_shape_is_complete(make_client):
         "error",
         "out_of_scope",
         "session_id",
+        "request_id",
     ]:
         assert key in data, f"missing key: {key}"
 
@@ -294,7 +296,7 @@ def test_provider_failure_returns_a_generic_message(make_client):
     """A provider outage must not leak a stack trace to the client."""
 
     class ExplodingLLM:
-        def invoke(self, messages):
+        def complete(self, role, messages, **kwargs):
             raise RuntimeError("groq connection failed: token=secret123")
 
     client = make_client(ExplodingLLM())
@@ -306,3 +308,24 @@ def test_provider_failure_returns_a_generic_message(make_client):
     assert data["error"] == "internal_error"
     assert "secret123" not in response.text
     assert "Traceback" not in response.text
+
+
+# --- 7. LLM failures and request ids (Phase 4) ----------------------------
+
+
+def test_every_response_has_a_request_id(make_client):
+    client = make_client(FakeLLM("SELECT name FROM customers LIMIT 1", "One."))
+    data = client.post("/chat", json={"question": "One customer"}).json()
+    assert len(data["request_id"]) == 36  # uuid4
+    assert "usage" not in data, "token totals are internal, not part of the API"
+
+
+def test_a_rate_limited_model_is_a_coded_answer_not_an_internal_error(make_client):
+    client = make_client(FakeLLM(LlmError(LlmErrorCode.RATE_LIMITED, "rate limited on big")))
+    response = client.post("/chat", json={"question": "How many customers?"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["error"] == "LLM_RATE_LIMITED"
+    assert "busy" in data["answer"]
+    assert "rate limited on big" not in response.text
+    assert data["sql"] is None

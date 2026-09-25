@@ -3,7 +3,9 @@
 Errors are returned as HTTP 200 with a populated field rather than as HTTP
 error codes, so the frontend has one response shape to handle. A failed query
 is a normal outcome of this application, not a transport failure. The `error`
-field carries an error code (see app/sql/errors.py), never database text.
+field carries an error code (app/sql/errors.py, or an LLM_* code from
+app/llm/client.py), never database or provider text. `request_id` ties a
+response to its LLM call-log lines.
 
 The app is built by create_app(settings, llm=None). Settings are validated
 before anything else is constructed, so a missing GROQ_API_KEY or GROQ_MODEL
@@ -49,6 +51,7 @@ class ChatResponse(BaseModel):
     error: str | None = None
     out_of_scope: bool = False
     session_id: str
+    request_id: str | None = None
 
 
 class SessionStore:
@@ -124,6 +127,7 @@ def create_app(settings: Settings | None = None, *, llm: Any = None) -> FastAPI:
                     "error": "internal_error",
                     "out_of_scope": False,
                     "session_id": session_id,
+                    "request_id": None,
                 },
             )
 

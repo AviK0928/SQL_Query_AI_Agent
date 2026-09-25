@@ -2,7 +2,14 @@
 Everything the LLM ever sees is assembled here. Note that prompts
 are not a security boundary (see D2 in the README): the guarantees
 are enforced in code by app/sql/validator.py and app/sql/executor.py.
-Instructions here reduce retries and cost, nothing more."""
+Instructions here reduce retries and cost, nothing more.
+
+Each prompt has an id of the form name@hash8, derived from its text, so any
+edit changes the id: cached answers for the old text stop matching, and every
+call-log line records exactly which prompt text was used. Phase 7 replaces this
+with versioned prompt files."""
+
+import hashlib
 
 # Refusal markers the model emits; not credentials (bandit B105 false positive, S4).
 OUT_OF_SCOPE_TOKEN = "OUT_OF_SCOPE"  # nosec B105
@@ -153,3 +160,16 @@ def build_answer_messages(question, columns, rows, truncated=False, limit_reache
         {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
         {"role": "user", "content": f"Question: {question}\n\nResults:\n{table}"},
     ]
+
+
+def _prompt_id(name, *texts):
+    """name@<first 8 hex chars of the SHA-256 of the prompt text>."""
+    digest = hashlib.sha256("\n".join(texts).encode()).hexdigest()[:8]
+    return f"{name}@{digest}"
+
+
+SQL_PROMPT_ID = _prompt_id("sql_gen", SQL_SYSTEM_PROMPT)
+RETRY_PROMPT_ID = _prompt_id("sql_repair", RETRY_SYSTEM_PROMPT)
+ANSWER_PROMPT_ID = _prompt_id(
+    "answer", ANSWER_SYSTEM_PROMPT, ROWS_HIDDEN_NOTE, TRUNCATED_NOTE, LIMIT_REACHED_NOTE
+)
