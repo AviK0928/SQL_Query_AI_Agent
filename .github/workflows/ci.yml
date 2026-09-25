@@ -25,7 +25,7 @@ concurrency:
 env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONDONTWRITEBYTECODE: "1"
-  MIN_TESTS: "106"  # raise deliberately when tests are added; CI fails if the count drops (T4)
+  MIN_TESTS: "226"  # raise deliberately when tests are added; CI fails if the count drops (T4)
 
 jobs:
   lint:
