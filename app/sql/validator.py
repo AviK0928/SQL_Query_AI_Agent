@@ -189,11 +189,19 @@ def validate_sql(
     tables = _check_tables(root, allowed_tables)
     query_limit = _enforce_row_cap(root, max_rows)
 
-    return ValidatedQuery(
-        sql=root.sql(dialect=DIALECT, comments=False),
-        tables=tables,
-        query_limit=query_limit,
-    )
+    sql_out = root.sql(dialect=DIALECT, comments=False)
+    # The regenerated SQL must itself parse. sqlglot accepts some incomplete
+    # input (a bare "SELECT" parses to a Select with no columns) and would
+    # regenerate it as invalid SQL. Found by the totality property test.
+    try:
+        sqlglot.parse_one(sql_out, read=DIALECT)
+    except (SqlglotError, RecursionError):
+        raise SqlSafetyError(
+            SqlErrorCode.PARSE_ERROR,
+            "The SQL is incomplete or malformed. Return one complete SELECT query.",
+        ) from None
+
+    return ValidatedQuery(sql=sql_out, tables=tables, query_limit=query_limit)
 
 
 def _parse_detail(exc: BaseException) -> str:

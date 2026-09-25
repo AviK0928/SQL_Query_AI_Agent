@@ -158,6 +158,22 @@ def test_unknown_table_is_repaired(make_agent):
     assert fake.call_count == 3
 
 
+def test_retry_can_decline_as_out_of_scope(make_agent):
+    fake = FakeLLM(
+        "SELECT revenue FROM customers",  # fails: no such column
+        "OUT_OF_SCOPE",  # the retry concludes the schema cannot answer it
+    )
+    bot = make_agent(fake)
+
+    result = bot.ask("Show me revenue")
+
+    assert result["out_of_scope"] is True
+    assert result["error"] is None
+    assert result["sql"] is None
+    assert "e-commerce database" in result["answer"]
+    assert fake.call_count == 2, "generate + retry; no answer-formatting call"
+
+
 # --- 4. retry exhausted -------------------------------------------------
 
 
