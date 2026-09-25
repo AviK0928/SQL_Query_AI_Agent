@@ -12,7 +12,7 @@ from app.agent import READ_ONLY_REPLY, Agent
 from app.config import load_settings
 from app.sql.errors import USER_MESSAGES, SqlErrorCode
 from app.sql.executor import ReadOnlyExecutor
-from tests.fakes import FakeLLM
+from tests.fakes import TEST_LLM_LIMITS, FakeLLM
 
 
 @pytest.fixture
@@ -26,6 +26,7 @@ def make_agent(test_settings):
                 env_file=None,
                 groq_api_key="test-key-not-real",
                 groq_model="fake/test-model",
+                llm_limits=TEST_LLM_LIMITS,
                 **overrides,
             )
         return Agent(settings, llm=fake)

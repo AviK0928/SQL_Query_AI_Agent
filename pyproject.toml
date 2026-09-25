@@ -121,7 +121,7 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
-module = ["app.sql.*"]
+module = ["app.sql.*", "app.llm.*"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true

@@ -47,7 +47,10 @@ def test_a04_leak_is_now_caught(offline_guard):
     app swallows the failure into internal_error, so only the recorded attempt
     proves the guard saw it."""
     settings = load_settings(
-        env_file=None, groq_api_key="dummy-key-for-guard-test", groq_model="fake/model"
+        env_file=None,
+        groq_api_key="dummy-key-for-guard-test",
+        groq_model="fake/model",
+        llm_limits={"fake/model": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000}},
     )
     client = TestClient(create_app(settings))  # llm=None: the real Groq client
 

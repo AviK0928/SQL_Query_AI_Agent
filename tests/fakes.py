@@ -1,9 +1,14 @@
-"""Test doubles and errors shared by the offline suite.
+"""Test doubles, errors and shared test configuration for the offline suite.
 
 One FakeLLM for every test file (previously duplicated in test_agent.py and
 test_api.py). It mimics the only part of LangChain's chat model the agent
 uses: `.invoke(messages)` returning an object with `.content`.
 """
+
+# The model and limits every offline test is configured with. Values mirror the
+# shape of the Groq console table; they are never sent anywhere.
+TEST_MODEL = "fake/test-model"
+TEST_LLM_LIMITS = {TEST_MODEL: {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000}}
 
 
 class FakeResponse:

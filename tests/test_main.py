@@ -1,11 +1,14 @@
 """App factory, startup validation, lazy module app, and the session store."""
 
+import json
+
 import pytest
 from fastapi import FastAPI
 
 import app.main as main
 from app.config import ConfigError
 from app.main import SessionStore, create_app
+from tests.fakes import TEST_LLM_LIMITS, TEST_MODEL
 
 
 @pytest.fixture
@@ -27,7 +30,8 @@ def test_module_app_is_lazy_and_validated(no_env_file, monkeypatch):
             _ = main.app
 
         monkeypatch.setenv("GROQ_API_KEY", "test-key-not-real")
-        monkeypatch.setenv("GROQ_MODEL", "fake/test-model")
+        monkeypatch.setenv("GROQ_MODEL", TEST_MODEL)
+        monkeypatch.setenv("LLM_LIMITS", json.dumps(TEST_LLM_LIMITS))
         assert isinstance(main.app, FastAPI)
         assert main.app is main.app, "built once, then cached"
     finally:
