@@ -19,7 +19,7 @@ SQL appeared, the database already refused to do anything except read.
 | Layer | Enforced by | Can the model talk its way past it? |
 |---|---|---|
 | Prompt instruction | Model cooperation | **Yes** |
-| Validator | `app/validator.py` | No |
+| Validator (sqlglot AST) | `app/sql/validator.py` | No |
 | Single-statement execution | Python's `sqlite3` driver | No |
 | Read-only connection + authorizer | SQLite engine | No |
 
@@ -233,6 +233,9 @@ semicolon inside a string literal — `WHERE city = 'Mum;bai'` — would be fals
 rejected. Fixing this properly needs a real SQL parser such as `sqlglot`. No
 value in the seed data contains a semicolon, so it cannot occur here.
 
+**Resolved in Phase 3.** The validator now parses with sqlglot and counts
+statements from the parse, so `'Mum;bai'` is accepted and tested.
+
 ---
 
 ## Testing
@@ -252,6 +255,46 @@ only the prefix check rejects them.
 The suite is trusted because it has been shown to fail when the code is wrong,
 not merely to pass when it is right.
 
+### A property test found a bug on its first run
+
+The validator was given random text and random sequences of SQL tokens, and
+every accepted query was re-checked independently. The first run failed on the
+smallest possible input: `SELECT`. sqlglot parses a bare `SELECT` as a query
+with no columns; the validator accepted it and added the row cap, producing
+`SELECT LIMIT 201`, which is not SQL. Nothing unsafe could happen, since SQLite
+would reject it, but the validator's promise is to hand over only complete
+queries. The fix covers the whole class: the regenerated SQL must itself parse.
+
+### Mutation testing at scale (Phase 3)
+
+mutmut changed `validator.py` and `executor.py` one operator or constant at a
+time, 394 times. The first run left 116 changes undetected. Most were real
+gaps: nothing required an error to carry a detail message (so a blank one would
+reach the retry prompt), boundaries such as `max_rows=1` and a query exactly at
+the length limit were untested, and the "(line N, column M)" format the retry
+prompt relies on was not pinned. One guard and 14 tests closed them.
+
+The 67 that remain were each classified rather than chased:
+
+- **12 unreachable by the tool.** `_classes` runs once at import, before mutmut
+  can switch a mutant on. `found = None` would crash the import if it were ever
+  active, which shows it never was.
+- **19 equivalent: the code changes, the behaviour does not.** A progress handler
+  returning 2 instead of 1 (any non-zero interrupts); `>=` instead of `>` on a
+  continuous-time deadline; fetching `cap + 2` rows (same flags, same rows);
+  `description or True` and `WRITE_TYPES or True` (never empty here); lower-case
+  SQL keywords; `comments=None` (as falsy as `False`); the `"XXXX"` fallback
+  keyword (matches nothing, like `""`); defaults for dict keys that are always
+  present; the generic dialect for tokenizing a first word or re-parsing SQLite
+  output; and `uri=True` removed, which is equivalent only because Colab's
+  SQLite honours `file:` names anyway. That last one matters on other builds,
+  so a test now proves the connection is read-only without the authorizer.
+- **36 message wording.** Tests pin the information an error carries (the
+  keyword, table, function or parameter it names), not its exact phrasing.
+  Pinning prose would make every copy edit break a test.
+
+Score: 83.0% of all mutants, 90.1% of the ones a test could possibly kill.
+
 ### Negative tests script the model to comply, not to refuse
 
 The brief requires a test that "Delete all users" is rejected. With a fake model
@@ -261,6 +304,9 @@ the model's cooperation, which this system does not rely on.
 The test instead scripts `DELETE FROM customers` on both the first attempt and
 the retry: the worst case, where the model fully obeys. It then asserts no rows
 were returned and all four tables still exist.
+
+Since Phase 3 a forbidden write is final, so the scripted retry is never
+requested: the test also asserts the model was called exactly once.
 
 ### Two tests assert on what did not happen
 
@@ -281,7 +327,7 @@ Changing the code to satisfy that test would have introduced a real defect.
 
 ### The whole suite runs offline
 
-78 tests, no API key, no network, ~2 seconds. Only the model is faked —
+226 tests as of Phase 3 (78 when this was written), no API key, no network, a few seconds. Only the model is faked —
 Pydantic validation, the graph, the validator, the real SQLite file and HTTP
 status codes all run for real.
 
@@ -336,6 +382,22 @@ miscounting rather than missing tests. A revenue figure was also stated wrongly
 in conversation before being checked against the database. Every count in this
 repository was confirmed by running something.
 
+It happened again in Phase 3: 193 predicted, 194 collected, because one new
+test was missed in the arithmetic. The collected number is the one recorded.
+
+### A check can fail because of how it was written
+
+Three times in Phase 3 a notebook cell reported a problem that did not exist.
+Stripping the output of `git status --porcelain` removed the leading space of
+the first line, whose status column is part of the format, so `app/agent.py`
+was read as `pp/agent.py`. `git add` on a file already removed with `git rm` is
+a hard error, even with `-A`. And a kernel restart silently drops `PATH` changes
+made by an earlier cell, so a git hook could not find the project's `mypy`.
+
+None of these was a real defect; each was a check written slightly wrong. The
+cells now use `git diff --name-only`/`--name-status`, stage only files that
+exist, and re-apply the venv `PATH` before committing.
+
 ---
 
 ## Known limitations
@@ -343,7 +405,7 @@ repository was confirmed by running something.
 | # | Limitation | When it bites |
 |---|---|---|
 | 1 | Money stored as `REAL` | Large sums accumulate float error |
-| 2 | Semicolon check is textual | A semicolon inside a string literal is falsely rejected |
+| 2 | ~~Semicolon check is textual~~ Resolved in Phase 3 (sqlglot) | — |
 | 3 | Session memory is in-process | Lost on restart; would not work across instances |
 | 4 | Sessions evicted oldest-first | An active session can be dropped before a stale one |
 | 5 | Prompt rules are probabilistic | Cancelled-order filter is sometimes not applied |
@@ -353,7 +415,7 @@ repository was confirmed by running something.
 
 ## If this were taken further
 
-- Replace the textual SQL checks with `sqlglot` parsing
+- ~~Replace the textual SQL checks with `sqlglot` parsing~~ (done in Phase 3)
 - Store money as integer paise
 - Move sessions to a store with a TTL
 - Stream responses so the first token appears sooner

@@ -61,16 +61,17 @@ flowchart LR
     U[Browser] --> F[FastAPI]
     F --> A[LangGraph agent]
     A <--> L[Groq LLM]
-    A --> V[SQL validator]
-    V --> D[(SQLite<br/>read-only)]
-    D --> A
+    A --> V[SQL validator<br/>sqlglot AST]
+    V --> X[Read-only executor<br/>authorizer, timeout, row cap]
+    X --> D[(SQLite<br/>read-only)]
+    X --> A
     A --> F --> U
 ```
 
 One service serves both the API and the frontend. The model never touches the
-database directly — everything it produces passes a validator first, and the
-connection it eventually reaches is read-only and guarded by a SQLite
-authorizer. Full detail in [`docs/architecture.md`](docs/architecture.md).
+database directly — everything it produces is parsed and checked by a sqlglot validator (S1),
+and only a validated query reaches the executor, whose connection is read-only
+and guarded by a SQLite authorizer (S2). Full detail in [`docs/architecture.md`](docs/architecture.md).
 
 ## Tech stack
 
@@ -139,13 +140,17 @@ prints its value (S3). Environment variables override `.env`.
 pytest -q
 ```
 
-**106 tests (T2), no API key needed, no network calls.** The language model is
+**226 tests (T5), no API key needed, no network calls.** The language model is
 replaced by a scripted fake. The suite is offline by construction, not by
 convention: a guard in `tests/conftest.py` removes every setting from the
 environment and blocks and records any non-loopback network attempt, failing
 the test even if the app swallowed the error (T1). Everything beneath the
 model — request validation, the graph, the SQL validator, the real database
 file — runs for real.
+
+The SQL safety layer is also covered by hypothesis property tests (T6) and a
+manual mutation-testing run with mutmut (T7): `mutmut run "app.sql.validator*"
+"app.sql.executor*"`, configured in `pyproject.toml`.
 
 The full quality gate, the same checks CI runs:
 
@@ -180,15 +185,16 @@ modify data — gets a polite refusal.
 |---|---|---|
 | `GET` | `/health` | `{"status": "ok"}` |
 | `GET` | `/schema` | Table and column names |
-| `POST` | `/chat` | `answer`, `sql`, `columns`, `rows`, `truncated`, `error`, `out_of_scope`, `session_id` |
+| `POST` | `/chat` | `answer`, `sql`, `columns`, `rows`, `truncated`, `limit_reached`, `error`, `out_of_scope`, `session_id` |
 | `GET` | `/` | The frontend |
 
 `POST /chat` takes `{"question": "...", "session_id": "..."}`. The session id is
 optional on the first request and returned in the response; send it back to keep
 conversation context.
 
-Failed queries return HTTP 200 with the `error` field populated, so the frontend
-has one response shape to handle. Malformed requests return 422.
+Failed queries return HTTP 200 with `error` set to an error code such as
+`EXECUTION_ERROR` or `FORBIDDEN_WRITE` (`app/sql/errors.py`), never database
+text (H1), so the frontend has one response shape to handle. Malformed requests return 422.
 
 ## Deployment
 
@@ -205,8 +211,9 @@ The SQLite file is committed, so there is no database to provision.
 - Money stored as `REAL`, so large sums accumulate floating-point error
 - Conversation memory is in-process and lost when the server restarts
 - Free tier sleeps after 15 minutes; first request takes 30-60 seconds
-- Semicolon detection is textual — a semicolon inside a string literal would be
-  falsely rejected
+- A query's own `LIMIT` below the row cap is kept (the prompt still asks for
+  `LIMIT 100`); when it is hit exactly the response sets `limit_reached` and the
+  answer is told more rows may exist (L5)
 - Prompt rules are followed most of the time, not always; anything that must
   hold is enforced in code instead
 - Summaries of large result sets can overstate, since only 20 rows are sent to
@@ -250,6 +257,10 @@ recovered and are listed as such rather than invented.
 | D15 | Supersedes D11. The app no longer starts without a key, so "no key" is not a runnable state. D11's intent is tested directly: `/health` returns 200 with zero LLM calls and zero database calls. | `tests/test_api.py::test_health_never_touches_the_llm_or_db` |
 | D16 | Dependencies are injected: `create_app(settings, llm=None)` builds `Agent`, `Database` and `SessionStore`. No module-level clients, graphs or session dicts. `app.main.app` is built lazily on first access so `uvicorn app.main:app` keeps working without a start-command change. | `app/main.py`, `app/agent.py`, `app/db.py` |
 | D17 | CI on every PR and push to `main`: lint and types first (fail fast), then tests on Python 3.12 and 3.13 and security scans in parallel. Read-only token permissions, no secrets, never calls Groq. Actions are pinned to major tags and kept current by Dependabot, which also proposes weekly pip updates, each gated by CI. The repo is public, so Actions minutes are free. | `.github/workflows/ci.yml`, `.github/dependabot.yml` |
+| D18 | SQL is validated by parsing it with sqlglot (SQLite dialect), replacing the regex validator (A-03). Checks run specific to general: size; first-token classification (writes and PRAGMA/ATTACH/VACUUM/EXPLAIN… identified by token, so their codes are stable across sqlglot versions); exactly one statement; no write node anywhere in the tree; the root must be a SELECT or set operation; no forbidden functions (`load_extension`, `pragma_*`, table-valued functions in FROM); every table in an allowlist read from `sqlite_master` (CTE names exempt, schemas other than `main` rejected). The SQL that runs is regenerated from the checked tree (comments removed) and must itself re-parse. | `app/sql/validator.py` |
+| D19 | The row cap is owned by code. The outermost `LIMIT` becomes `cap + 1` when absent or at/above the cap, and the executor fetches `cap + 1` rows, so `truncated` is exact (fixes A-02 for the cap). A query `LIMIT` below the cap is kept and reported as `query_limit`; when hit exactly, `limit_reached` is set and the answer prompt says more rows may exist. The answer prompt's notes (rows hidden beyond 20, truncated, limit reached) are added independently. | `app/sql/validator.py`, `app/sql/executor.py`, `app/prompts.py` |
+| D20 | Typed error taxonomy: 13 `SqlErrorCode`s raised as `SqlSafetyError(code, detail)`. Only `PARSE_ERROR`, `UNKNOWN_TABLE`, `EXECUTION_ERROR` and `INVALID_LIMIT` earn the single retry; a forbidden write, stacked statement, timeout or other final code does not, saving a Groq request. Users get a fixed message per code; `detail` goes only to the retry prompt and logs, and the constructor rejects an empty one (found by mutation testing, T7). | `app/sql/errors.py`, `app/agent.py` |
+| D21 | API response (Phase 3): `sql` is the SQL that passed validation and ran, or `null` when nothing passed, so rejected SQL is never shown as the query that ran; `error` is an `SqlErrorCode` value; new field `limit_reached`. The frontend uses `error` only as a flag, so the UI is unchanged. | `app/agent.py`, `app/main.py` |
 
 ### Limitations
 
@@ -258,13 +269,15 @@ recovered and are listed as such rather than invented.
 | L1–L2 | Not recoverable (pre-refactor, never cited). | — |
 | L3 | Conversation sessions are process-local and lost on restart. Acceptable on a single free-tier instance. Access is now lock-guarded (D16). | `app/main.py::SessionStore` |
 | L4 | Groq free-tier limits for `openai/gpt-oss-120b`, read 24 Sep 2026: 30 RPM, 1K RPD, 8K TPM, 200K TPD. Measured ~590 tokens per call, so TPM is the binding limit (~10 calls/min with a 20% margin). Re-check in the Groq console; limits change. | `AUDIT.md` §5 |
+| L5 | Prompt rule 3 still asks the model for `LIMIT 100`, below the 200-row cap. Such a result is not truncated by code but may be incomplete; this is disclosed through `limit_reached` (D19). Removing the rule is a prompt change, so it waits for Phase 7 evals. | `app/prompts.py` |
+| L6 | The frontend's truncation note hard-codes "capped at 200". It matches the `MAX_ROWS` default but does not follow the setting. | `frontend/app.js` |
 
 ### Security
 
 | Tag | Control | Where |
 |---|---|---|
-| S1 | SQL validator: the first, cheap gate. Currently regex-based with known false rejections and a comment-stripping bug (A-03); replaced by sqlglot AST validation in Phase 3. | `app/validator.py` |
-| S2 | The enforcement layer: SQLite opened read-only (`mode=ro`) with an authorizer that denies everything except SELECT/READ/FUNCTION/RECURSIVE, plus a query timeout. | `app/db.py` |
+| S1 | SQL validator, the first layer: sqlglot AST validation (D18) replaced the regex validator in Phase 3, closing A-03's false rejections and comment bug. It fails cheaply with a typed code (D20) and hands the executor only a `ValidatedQuery`. It is not the enforcement point: S2 holds even if S1 has a bug. | `app/sql/validator.py` |
+| S2 | The enforcement layer: `ReadOnlyExecutor` opens SQLite read-only (`mode=ro`) with an authorizer that denies everything except SELECT/READ/FUNCTION/RECURSIVE (which also blocks ATTACH and PRAGMA, allowed by `mode=ro` alone), a progress-handler timeout and a `cap + 1` fetch. It accepts only a `ValidatedQuery`. Tested on its own: forged queries that bypass S1 (DELETE, ATTACH, PRAGMA writable_schema) are denied and logged, and a raw write on its connection fails without the authorizer. | `app/sql/executor.py`, `tests/unit/test_sql_executor.py` |
 | S3 | `ConfigError` never contains input values. pydantic's own `ValidationError` embeds `input_value`, which can include the API key, so it is replaced and suppressed (`from None`). | `app/config.py`, `tests/test_config.py` |
 | S4 | bandit scans `app/` in CI. Its four findings at introduction were false positives, all in `app/prompts.py`, suppressed line by line with `# nosec <code>` and a reason: B105 on the `OUT_OF_SCOPE`/`READ_ONLY` refusal markers (not credentials) and B608 on the two system prompts (text for the LLM, never executed as SQL). bandit prints "nosec encountered … but no failed test" warnings for lines inside those multi-line strings; they do not fail the scan and disappear in Phase 7, when prompts move to versioned files. | `app/prompts.py`, `pyproject.toml` |
 | S5 | Dependency and secret scanning in CI. pip-audit checks every installed package against known advisories; its first run found PYSEC-2026-1845 in `pytest 8.4.2`, fixed by upgrading the pin to `9.0.3` (same 106 tests collected and passing). gitleaks scans the full commit history on every run; the first run over all history was clean (24 Sep 2026). | `.github/workflows/ci.yml`, `pyproject.toml` |
@@ -277,10 +290,16 @@ recovered and are listed as such rather than invented.
 | T2 | 106 tests collected and passing (`pytest --collect-only`), 24 Sep 2026: first at `e79f31c`, re-confirmed after the Phase 1 lint and format pass. Up from 79 at `f6e44c0`. | `tests/` |
 | T3 | The Phase 1 lint and format pass did not change any test. Proven by comparing the syntax tree of all 146 `assert` statements before and after `ruff format` and `ruff check --fix`, and the full syntax tree of each hand-edited file (identical). | Phase 1 notebook cells P1-13, P1-15 |
 | T4 | CI fails if fewer than `MIN_TESTS` (106) tests are collected, so tests cannot disappear silently. Raising the number is a deliberate edit in `ci.yml`. The suite runs on Python 3.12 (Render) and 3.13 (Colab). | `.github/workflows/ci.yml` |
+| T5 | 226 tests collected and passing, 25 Sep 2026 at `4e2935e` (106 before Phase 3). The 32 regex-validator tests were ported with their original expectations, now also asserting error codes. Four agent/API expectations changed deliberately and became stricter: no retry after a forbidden write or stacked statement, `error` is a code, rejected SQL is not returned as `sql`. `app/sql`, `app/agent.py` and `app/db.py` are at 100% line and branch coverage. `MIN_TESTS` raised to 226 (T4). | `tests/`, `.github/workflows/ci.yml` |
+| T6 | Property tests with hypothesis (derandomized `ci` profile, 200 examples; `HYPOTHESIS_PROFILE=dev` runs 5,000): totality over random text and SQL-token soup (anything accepted is re-checked independently), stacked statements never accepted, case- and comment-obfuscated writes always `FORBIDDEN_WRITE`, and the row-cap rule for any LIMIT and cap. The totality property found a real bug on its first run: a bare `SELECT` was accepted and regenerated as `SELECT LIMIT 201`; fixed by re-parsing the regenerated SQL. | `tests/unit/test_sql_properties.py`, `tests/unit/conftest.py` |
+| T7 | Mutation testing (mutmut 3.8, manual, 25 Sep 2026) on `app/sql/validator.py` and `app/sql/executor.py` against `tests/unit`: 394 mutants, 324 killed + 3 timeouts = 83.0%. The first run left 116 survivors; the real gaps were closed with 14 tests and one guard (D20). All 67 remaining survivors are classified: 12 unreachable by the tool (`_classes` runs at import), 19 equivalent (listed in DISCOVERIES), 36 message wording (policy: tests pin the information a message carries, not its phrasing). Excluding the 31 unkillable: 327/363 = 90.1%. | `pyproject.toml` `[tool.mutmut]` |
 
 ### Data handling
 
-None recorded yet (Phase 9).
+| Tag | Record | Where |
+|---|---|---|
+| H1 | Errors reach the client as codes, never database text. SQLite messages go only to the retry prompt and logs (D20, D21). Tested: a failing query's API response contains no `no such column`. | `app/agent.py`, `tests/test_api.py` |
+| H2 | Open, for Phase 9: sqlglot logs a warning containing the SQL text when it falls back to parsing a statement as a raw command (for example `SHOW TABLES`), so model output can reach the logs. To be fixed by lowering sqlglot's log level when logging is designed. | `app/sql/validator.py` |
 
 ### Process
 
@@ -293,6 +312,8 @@ None recorded yet (Phase 9).
 | P9 | Three times a pull request was merged without its last intended commit: PR #2 (merge commit, stale head; two verified commits missing; fixed by #3), PR #4 (squash, merged before the docs commit landed; registry update missing; fixed by #13), and PR #14 (squash of a branch whose final commit, this row's correction, was never pushed; the merge commit `bc49311` is empty; fixed in the Phase 3 carry-over PR). All three were caught by comparing `main`'s tree with the last verified commit, not by commit ancestry (which squash merges break). `main` keeps the resulting history rather than being force-pushed. Rule since: before merging, the push cell must have succeeded and the PR's Commits tab must end at the hash it printed. | Notebook cells P1-17, P1-18, P2-8, P3-2 |
 | P10 | `main` is protected: changes arrive only through pull requests, which merge only when all four CI checks pass. The repo allows squash merging only, with the PR title as the commit message, so each PR lands as one conventional commit (prevents P9). Force pushes and deletion of `main` are blocked. Pushing workflow files needs a PAT with **Workflows: Read and write** on this repository. | GitHub repository settings |
 | P11 | Dependabot PR #8 (uvicorn 0.51.0 → 0.53.0) was merged as an empty squash commit (`ec8a5c2`): its change was lost resolving a conflict on the PR branch, so the history said uvicorn was bumped while `pyproject.toml` still pinned 0.51.0. Found in the Phase 2 close-out and restored in Phase 3. Dependabot now groups updates per ecosystem, so sibling PRs no longer conflict on the same `pyproject.toml` lines. Rule since: after merging any PR, `git show --stat` of the merge commit must list the expected files. | `.github/dependabot.yml`, `pyproject.toml` |
+| P12 | Phase 3 landed in two PRs because #16 (validator and executor) was merged mid-phase. It was merged with GitHub's default title `Feat/phase 3 sql safety`, built from the branch name because the PR had several commits, so `main` has one non-conventional subject; history is kept. Its content was verified by fetching `refs/pull/16/head` (GitHub keeps it after the branch is deleted) and comparing it with the last verified commit `2ec48f8`, because the Colab clone no longer had that commit. Rule since: set the PR title by hand before merging. | Notebook cells P3-21, P3-22 |
+| P13 | Three notebook-cell bugs made a correct state look wrong: `.strip()` on multi-line `git status --porcelain` cut the first line's status column; `git add` with a path already removed by `git rm` is a hard error; and a kernel restart drops `PATH` changes made by Cell 7, so the pre-commit mypy hook could not find `mypy`. Rules since: use `git diff --name-only`/`--name-status`; stage only files that exist; cells that commit re-apply the venv `PATH`. | Notebook cells P3-12, P3-23, P3-24 |
 
 ### Verification
 

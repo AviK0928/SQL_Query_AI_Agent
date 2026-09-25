@@ -5,8 +5,11 @@ expectation, now also asserting the specific error code. The old file is
 removed when the agent switches to this validator.
 """
 
+import re
+
 import pytest
 from sqlglot import exp
+from sqlglot.errors import TokenError
 
 from app.db import Database
 from app.sql import validator as validator_module
@@ -374,3 +377,46 @@ def test_error_string_carries_code_and_detail():
     error = SqlSafetyError(C.TIMEOUT, "stopped after 5.0 seconds")
     assert str(error) == "TIMEOUT: stopped after 5.0 seconds"
     assert error.user_message == USER_MESSAGES[C.TIMEOUT]
+
+
+# --- mutation-testing follow-ups (Phase 3, step 4c) -------------------------
+
+
+@pytest.mark.parametrize("detail", ["", "   ", None])
+def test_safety_error_requires_a_detail(detail):
+    with pytest.raises(ValueError, match="non-empty detail"):
+        SqlSafetyError(C.PARSE_ERROR, detail)
+
+
+def test_sql_exactly_at_the_length_limit_is_accepted():
+    padded = "SELECT 1".ljust(50)
+    assert len(padded) == 50
+    check(padded, max_chars=50)
+
+
+def test_parse_error_detail_names_the_position():
+    detail = rejected("SELECT * FROM customers WHERE (city = 'Delhi'").detail
+    assert re.search(r"\(line \d+, column \d+\)", detail)
+    assert "None" not in detail
+    assert "syntax error" not in detail, "should be sqlglot's description, not the fallback"
+
+
+def test_tokenizer_error_detail_is_its_first_line(monkeypatch):
+    def boom(*args, **kwargs):
+        raise TokenError("bad token here\nsecond line")
+
+    monkeypatch.setattr(validator_module.sqlglot, "tokenize", boom)
+    assert rejected("SELECT 1").detail.endswith(": bad token here")
+
+
+def test_error_without_a_message_falls_back_to_syntax_error(monkeypatch):
+    def boom(*args, **kwargs):
+        raise TokenError("")
+
+    monkeypatch.setattr(validator_module.sqlglot, "tokenize", boom)
+    assert rejected("SELECT 1").detail.endswith(": syntax error")
+
+
+def test_max_rows_error_names_the_parameter():
+    with pytest.raises(ValueError, match="max_rows"):
+        check("SELECT 1", max_rows=0)

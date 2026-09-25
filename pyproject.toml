@@ -128,3 +128,12 @@ check_untyped_defs = true
 disallow_any_generics = true
 warn_return_any = true
 strict_equality = true
+
+[tool.mutmut]
+# Mutation testing is manual (Colab), never CI. Only app/sql/validator.py and
+# app/sql/executor.py mutants are tested, selected by name on the command line;
+# all of app/ is listed so imports resolve inside mutmut's mutants/ copy.
+source_paths = ["app/"]
+also_copy = ["database/", "tests/"]
+pytest_add_cli_args_test_selection = ["tests/unit/"]
+pytest_add_cli_args = ["--no-cov", "-p", "no:cacheprovider"]

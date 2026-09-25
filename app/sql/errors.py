@@ -78,6 +78,10 @@ class SqlSafetyError(Exception):
     """A query was rejected or failed. Raised only inside app/sql/."""
 
     def __init__(self, code: SqlErrorCode, detail: str) -> None:
+        # An empty detail would reach the retry prompt as a blank message.
+        # Enforced here so no raise site can omit it (found by mutation testing).
+        if not isinstance(detail, str) or not detail.strip():
+            raise ValueError("SqlSafetyError needs a non-empty detail message")
         super().__init__(f"{code}: {detail}")
         self.code = code
         self.detail = detail

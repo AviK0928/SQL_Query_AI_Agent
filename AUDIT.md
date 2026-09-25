@@ -201,3 +201,15 @@ refactor targets: honesty about partial or filtered results (b05, b13),
 answer faithfulness (b14), and ambiguity handling (b08). Two of the four
 (b13, b14) produced a false statement from correct rows, which is the
 `check_answer` node's job in Phase 5.
+
+## Status updates
+
+The findings above are the Phase 0 snapshot and are kept as recorded.
+
+| Finding | Status | Record |
+|---|---|---|
+| A-02 silent truncation | Fixed for the row cap in Phase 3: the cap is enforced in code and `truncated` is exact. The prompt's own `LIMIT 100` remains and is disclosed through `limit_reached`. | README D19, L5 |
+| A-03 regex validator | Resolved in Phase 3: replaced by sqlglot AST validation. | README D18, S1 |
+| Test gap: no property tests on the validator | Closed in Phase 3. | README T6 |
+| Test gap: no test that a model-imposed LIMIT is disclosed | Closed in Phase 3 (`test_limit_reached_*`). | README D19 |
+| A-22 unrequested personal data | Open; prompt work in Phase 7. | — |
