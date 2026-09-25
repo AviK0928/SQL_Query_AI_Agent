@@ -1,43 +1,26 @@
-"""LangGraph flow: question -> SQL -> validate -> execute -> answer.
-
-Validation and execution go through the SQL safety layer in app/sql/: the
-sqlglot validator (S1) and the read-only executor (S2). Failures arrive as
-SqlSafetyError codes. Only repairable codes (a parse error, an unknown table or
-column, an invalid LIMIT) earn the single retry; a forbidden write, a stacked
-statement or a timeout is final, because retrying it spends a Groq request with
-no chance of a safe, useful result.
-
-The retry path increments retry_count, so a second failure can only route to
-the answer node -- an infinite loop is structurally impossible, not merely
-guarded against.
-
-Every model call goes through the LLM gateway (app/llm/gateway.py) with a
-role per node (sql_generator, sql_repair, synthesizer), the prompt id, the
-schema hash and a request id shared by all calls for one question. An LlmError
-from generation or repair becomes a fixed answer and an LLM_* error code; if
-only the summary fails, the rows that were already fetched are still returned.
-
-Dependencies (settings, LLM gateway, schema reader, executor) are passed to the
-Agent constructor. There are no module-level clients or graphs; tests build an
-Agent with a fake LLM instead of patching globals.
-Spring comparison: constructor injection instead of static fields.
-"""
+"""The LangGraph flow and the Agent that owns it (moved from app/agent.py in Phase 5)."""
 
 from __future__ import annotations
 
 import re
 import uuid
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any
 
 from langgraph.graph import END, StateGraph
 
+from app.agent.llm import _add_usage, build_llm
+from app.agent.replies import (
+    LLM_ERROR_REPLIES,
+    NO_USAGE,
+    OUT_OF_SCOPE_REPLY,
+    READ_ONLY_REPLY,
+    SUMMARY_UNAVAILABLE_REPLY,
+    TEMPERATURE,
+)
+from app.agent.state import AgentState
 from app.db import Database
-from app.llm.cache import ResponseCache
-from app.llm.calllog import CallLogger
-from app.llm.client import LlmClient, LlmError, LlmErrorCode, build_groq_transport
-from app.llm.gateway import LlmGateway
-from app.llm.limiter import RateLimiter
-from app.llm.registry import LlmRole, ModelRegistry
+from app.llm.client import LlmError
+from app.llm.registry import LlmRole
 from app.prompts import (
     ANSWER_PROMPT_ID,
     OUT_OF_SCOPE_TOKEN,
@@ -50,54 +33,10 @@ from app.prompts import (
 )
 from app.sql.errors import USER_MESSAGES, SqlErrorCode, SqlSafetyError
 from app.sql.executor import ReadOnlyExecutor
-from app.sql.validator import ValidatedQuery, validate_sql
+from app.sql.validator import validate_sql
 
 if TYPE_CHECKING:
     from app.config import Settings
-
-TEMPERATURE = 0
-
-READ_ONLY_REPLY = (
-    "I can only read from this database, not change it. "
-    "Try asking a question about the existing data instead."
-)
-
-OUT_OF_SCOPE_REPLY = (
-    "I can only answer questions about the e-commerce database "
-    "(customers, products, orders and order items). Try asking about "
-    "customers, sales or products."
-)
-
-LLM_ERROR_REPLIES = {
-    LlmErrorCode.RATE_LIMITED: "The AI service is busy right now. Please try again in a minute.",
-    LlmErrorCode.TIMEOUT: "The AI service took too long to respond. Please try again.",
-    LlmErrorCode.UNAVAILABLE: "The AI service is unavailable right now. Please try again shortly.",
-    LlmErrorCode.MODEL_UNAVAILABLE: "The AI model is unavailable. Please try again later.",
-    LlmErrorCode.BAD_REQUEST: "That question could not be processed. Try a shorter or simpler one.",
-}
-
-SUMMARY_UNAVAILABLE_REPLY = "Here are the results; a summary couldn't be generated right now."
-
-NO_USAGE = {"calls": 0, "cache_hits": 0, "input_tokens": 0, "output_tokens": 0}
-
-
-class AgentState(TypedDict, total=False):
-    question: str
-    history: list
-    sql: str | None  # latest SQL from the model (raw until validated)
-    validated: ValidatedQuery | None  # set only when validation passed
-    columns: list
-    rows: list
-    truncated: bool
-    limit_reached: bool
-    error: str | None  # an SqlErrorCode value
-    error_detail: str | None  # for the retry prompt only; never shown to users
-    repairable: bool
-    retry_count: int
-    out_of_scope: bool
-    answer: str
-    request_id: str
-    usage: dict[str, int]  # tokens for this question only
 
 
 def _clean_sql(text):
@@ -111,35 +50,6 @@ def _clean_sql(text):
 
 def _error_state(exc: SqlSafetyError) -> dict[str, Any]:
     return {"error": exc.code.value, "error_detail": exc.detail, "repairable": exc.repairable}
-
-
-def build_llm(settings: Settings) -> LlmGateway:
-    """The production LLM stack, configured only from Settings (never os.environ):
-    Groq transport -> LlmClient (rate limiter, retries, fallback) -> LlmGateway
-    (cache when LLM_CACHE_PATH is set, call log). Builds objects only; no network."""
-    registry = ModelRegistry.from_settings(settings)
-    client = LlmClient(
-        registry,
-        build_groq_transport(settings.groq_api_key.get_secret_value(), settings.llm_timeout_s),
-        max_attempts=settings.llm_max_attempts,
-        max_wait_s=settings.llm_max_wait_s,
-        limiter=RateLimiter(
-            registry, margin=settings.llm_safety_margin, max_wait_s=settings.llm_max_wait_s
-        ),
-    )
-    cache = ResponseCache(settings.llm_cache_path) if settings.llm_cache_path else None
-    return LlmGateway(client, cache=cache, call_log=CallLogger.from_settings(settings))
-
-
-def _add_usage(usage: dict[str, int] | None, result: Any) -> dict[str, int]:
-    total = dict(usage or NO_USAGE)
-    if getattr(result, "cache_hit", False):
-        total["cache_hits"] += 1
-    else:
-        total["calls"] += 1
-        total["input_tokens"] += getattr(result, "input_tokens", 0)
-        total["output_tokens"] += getattr(result, "output_tokens", 0)
-    return total
 
 
 def route_after_execute(state):
