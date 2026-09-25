@@ -18,6 +18,11 @@ Run from the repo root:
 Since Phase 1 the agent is built explicitly (Agent(settings, llm=...)) instead
 of through module globals. Behaviour under test is unchanged, so results stay
 comparable with the Phase 0 file (same prompt hash, same schema hash).
+
+Since Phase 4 the agent calls an LLM gateway with complete(role, messages, ...)
+and provider failures arrive as coded answers (LLM_*), not exceptions. Only
+that plumbing changed; the grading functions are identical to Phase 0.
+Use --tag to write a separate results file per run.
 """
 
 from __future__ import annotations
@@ -96,27 +101,25 @@ class RecordingLLM:
         self._last = 0.0
         self.calls: list[dict] = []
 
-    def invoke(self, messages):
+    def complete(self, role, messages, **kwargs):
         wait = self.min_interval_s - (time.monotonic() - self._last)
         if wait > 0:
             time.sleep(wait)
         start = time.monotonic()
         try:
-            response = self.inner.invoke(messages)
+            result = self.inner.complete(role, messages, **kwargs)
         finally:
             self._last = time.monotonic()
-        usage = getattr(response, "usage_metadata", None) or {}
         self.calls.append(
             {
                 "latency_s": round(self._last - start, 3),
-                "input_tokens": usage.get("input_tokens"),
-                "output_tokens": usage.get("output_tokens"),
-                "model_reported": (getattr(response, "response_metadata", {}) or {}).get(
-                    "model_name"
-                ),
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+                "model_reported": result.model,
+                "cache_hit": result.cache_hit,
             }
         )
-        return response
+        return result
 
 
 def is_rate_limit(exc: BaseException) -> bool:
@@ -267,6 +270,7 @@ def main() -> int:
         help="Seconds between LLM calls. Set from your model's RPM limit.",
     )
     parser.add_argument("--only", nargs="*", help="Run only these item ids.")
+    parser.add_argument("--tag", help="Suffix for the results file, e.g. before-phase5.")
     parser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt.")
     parser.add_argument(
         "--summary-only",
@@ -292,7 +296,8 @@ def main() -> int:
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     safe_model = re.sub(r"[^A-Za-z0-9._-]", "_", model)
-    out_path = RESULTS_DIR / f"baseline_{prompt_hash()}_{safe_model}.jsonl"
+    suffix = f"_{args.tag}" if args.tag else ""
+    out_path = RESULTS_DIR / f"baseline_{prompt_hash()}_{safe_model}{suffix}.jsonl"
     done = load_done(out_path)
     todo = [i for i in items if i["id"] not in done]
 
@@ -314,18 +319,10 @@ def main() -> int:
         print("Aborted.")
         return 1
 
-    from langchain_groq import ChatGroq
+    from app.agent import build_llm
 
-    llm = RecordingLLM(
-        ChatGroq(
-            model=model,
-            temperature=TEMPERATURE,
-            timeout=60,
-            max_retries=2,
-            api_key=settings.groq_api_key,
-        ),
-        min_interval_s=args.min_interval,
-    )
+    # Phase 4: the production stack (rate limiter, retries, fallback, call log).
+    llm = RecordingLLM(build_llm(settings), min_interval_s=args.min_interval)
     bot = Agent(settings, llm=llm)
 
     meta = {
@@ -353,6 +350,13 @@ def main() -> int:
                 exception=type(exc).__name__,
                 message=str(exc)[:300],
                 rate_limited=is_rate_limit(exc),
+            )
+        if str(record.get("error") or "").startswith("LLM_"):
+            # Phase 4: a provider failure is a coded answer, not a result to grade.
+            record.update(
+                status="error",
+                exception=record["error"],
+                rate_limited=record["error"] == "LLM_RATE_LIMITED",
             )
         with out_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
