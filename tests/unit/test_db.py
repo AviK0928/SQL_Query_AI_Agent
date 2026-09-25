@@ -42,3 +42,10 @@ def test_schema_hash_ignores_data_but_tracks_schema(tmp_path):
     con.commit()
     con.close()
     assert Database(path).schema_hash() != before, "schema changes must change the hash"
+
+
+def test_the_old_import_path_still_works():
+    from app.db import Database as Old
+    from app.sql.schema import Database as New
+
+    assert Old is New

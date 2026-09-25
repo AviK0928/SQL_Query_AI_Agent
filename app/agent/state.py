@@ -26,4 +26,5 @@ class AgentState(TypedDict, total=False):
     blocked: bool  # guard_input rejected the question; no model call was made
     reply: str  # the generator's raw reply, before classification
     needs_clarification: bool  # the answer is a clarifying question
+    max_repairs: int  # MAX_REPAIR_ATTEMPTS for this question
     usage: dict[str, int]  # tokens for this question only

@@ -444,3 +444,31 @@ def test_a_clarifying_question_ends_the_turn(make_agent, sql_seen):
 def test_ordinary_answers_do_not_need_clarification(make_agent):
     result = make_agent(FakeLLM("SELECT name FROM customers LIMIT 1", "One.")).ask("One customer")
     assert result["needs_clarification"] is False
+
+
+# --- 11. configurable repair attempts (Phase 5) ---------------------------
+
+
+@pytest.mark.parametrize(("attempts", "calls"), [(0, 1), (2, 3)])
+def test_repair_attempts_are_configurable_and_bounded(make_agent, attempts, calls):
+    fake = FakeLLM(
+        "SELECT revenue FROM customers",
+        "SELECT nope FROM customers",
+        "SELECT still_nope FROM customers",
+    )
+    result = make_agent(fake, max_repair_attempts=attempts).ask("Show me revenue")
+    assert result["error"] == SqlErrorCode.EXECUTION_ERROR
+    assert fake.call_count == calls, "generation plus exactly `attempts` repairs, no answer call"
+
+
+def test_a_second_repair_can_succeed(make_agent):
+    fake = FakeLLM(
+        "SELECT revenue FROM customers",
+        "SELECT nope FROM customers",
+        "SELECT name FROM customers LIMIT 2",
+        "Two customers.",
+    )
+    result = make_agent(fake, max_repair_attempts=2).ask("Show me revenue")
+    assert result["error"] is None
+    assert len(result["rows"]) == 2
+    assert fake.roles.count(LlmRole.SQL_REPAIR) == 2

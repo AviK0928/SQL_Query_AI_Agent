@@ -1,7 +1,8 @@
 """The LangGraph flow and the Agent that owns it (moved from app/agent.py in Phase 5).
 
 Flow: guard_input -> generate_sql -> classify_intent -> validate -> execute
--> (retry once, if repairable) -> format_answer. A rejected question ends at
+-> (repair, if repairable, up to MAX_REPAIR_ATTEMPTS times) -> format_answer.
+A rejected question ends at
 guard_input with no model call; a refusal or a clarifying question ends at
 classify_intent. Node decisions live in app/agent/nodes/ as pure functions.
 """
@@ -71,8 +72,12 @@ def route_after_classify(state):
 
 
 def route_after_execute(state):
-    """The only branch in the graph: one retry, and only for repairable errors."""
-    if state.get("error") and state.get("repairable") and state.get("retry_count", 0) == 0:
+    """Repair only repairable errors, and at most MAX_REPAIR_ATTEMPTS times."""
+    if (
+        state.get("error")
+        and state.get("repairable")
+        and state.get("retry_count", 0) < state.get("max_repairs", 1)
+    ):
         return "retry"
     return "answer"
 
@@ -199,10 +204,10 @@ class Agent:
                 "out_of_scope": True,
                 "sql": None,
                 "answer": OUT_OF_SCOPE_REPLY,
-                "retry_count": 1,
+                "retry_count": state.get("retry_count", 0) + 1,
             }
 
-        return {**cleared, "sql": text, "retry_count": 1}
+        return {**cleared, "sql": text, "retry_count": state.get("retry_count", 0) + 1}
 
     def format_answer(self, state):
         """LLM call 3: turn rows into a sentence."""
@@ -277,6 +282,7 @@ class Agent:
                     "request_id": request_id,
                     "usage": dict(NO_USAGE),
                     "blocked": False,
+                    "max_repairs": self.settings.max_repair_attempts,
                     "needs_clarification": False,
                 }
             )

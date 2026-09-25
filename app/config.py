@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     max_rows: PositiveInt = 200
     query_timeout_s: PositiveFloat = 5.0
     max_history_turns: PositiveInt = 3
+    max_repair_attempts: int = Field(1, ge=0, le=3)  # repairs of a failed query; bounded
 
     # --- LLM client (Phase 4) ------------------------------------------------
     # Per-model limits from the Groq console, as JSON. Required, and every model

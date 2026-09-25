@@ -133,6 +133,7 @@ prints its value (S3). Environment variables override `.env`.
 | `MAX_ROWS` | No | `200` | Row cap per query |
 | `QUERY_TIMEOUT_S` | No | `5.0` | SQLite query timeout |
 | `MAX_HISTORY_TURNS` | No | `3` | Conversation turns replayed to the model |
+| `MAX_REPAIR_ATTEMPTS` | No | `1` | Repairs of a failed query (0–3); each costs one model call |
 | `LLM_LIMITS` | Yes | — | Per-model limits from the Groq console, as JSON: `{"model": {"rpm": …, "rpd": …, "tpm": …, "tpd": …}}`. Every model the app can call needs an entry; never hard-coded (D22) |
 | `GROQ_FALLBACK_MODEL` | No | none | Used on persistent 429s or a retired model; must differ from `GROQ_MODEL` |
 | `LLM_ROLE_MODELS` | No | `{}` | Per-role overrides as JSON; roles: `classifier`, `sql_generator`, `sql_repair`, `synthesizer`, `judge` |

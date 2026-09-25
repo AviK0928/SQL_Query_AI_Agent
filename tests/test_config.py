@@ -204,3 +204,13 @@ def test_settings_are_read_only():
 
 def test_settings_class_is_the_public_type():
     assert isinstance(valid(), Settings)
+
+
+@pytest.mark.parametrize("value", [-1, 4])
+def test_repair_attempts_are_bounded(value):
+    with pytest.raises(ConfigError, match="MAX_REPAIR_ATTEMPTS"):
+        valid(max_repair_attempts=value)
+
+
+def test_repair_attempts_default_to_one():
+    assert valid().max_repair_attempts == 1

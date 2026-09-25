@@ -3,13 +3,14 @@
 Validation and execution go through the SQL safety layer in app/sql/: the
 sqlglot validator (S1) and the read-only executor (S2). Failures arrive as
 SqlSafetyError codes. Only repairable codes (a parse error, an unknown table or
-column, an invalid LIMIT) earn the single retry; a forbidden write, a stacked
+column, an invalid LIMIT) earn a repair attempt
+(MAX_REPAIR_ATTEMPTS, default 1); a forbidden write, a stacked
 statement or a timeout is final, because retrying it spends a Groq request with
 no chance of a safe, useful result.
 
-The retry path increments retry_count, so a second failure can only route to
-the answer node -- an infinite loop is structurally impossible, not merely
-guarded against.
+Each repair increments retry_count and routing stops once it reaches
+MAX_REPAIR_ATTEMPTS (validated to at most 3), so the loop is bounded by
+construction, not merely guarded against.
 
 Every model call goes through the LLM gateway (app/llm/gateway.py) with a
 role per node (sql_generator, sql_repair, synthesizer), the prompt id, the
