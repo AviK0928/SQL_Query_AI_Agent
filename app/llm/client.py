@@ -215,6 +215,7 @@ class LlmResult:
     fallback_used: bool
     latency_ms: int
     headers: Mapping[str, str] = field(default_factory=dict)
+    cache_hit: bool = False
 
 
 class LlmClient:
