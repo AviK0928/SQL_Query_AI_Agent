@@ -32,6 +32,3 @@ htmlcov/
 
 # hypothesis example database
 .hypothesis/
-
-# mutmut working copy
-mutants/
