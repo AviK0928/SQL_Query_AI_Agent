@@ -427,6 +427,22 @@ the Phase 6 harness, where the new grading is measured on its own.
 
 ---
 
+### Groq's edge rejected Python's default HTTP client
+
+The model-catalog call returned 403 through `urllib` while the same key had just made successful calls through the `groq` SDK. The 403 comes from the edge, not the API: Python's default user agent is refused before the key is checked. Catalog checks now use the SDK, which is also the production path.
+
+### The model catalog was smaller than expected
+
+Of the 11 models listed on 26 Sep 2026, only 4 generate text; the rest are speech, text-to-speech, or safety classifiers. That narrows the choice, so every text model was put through the smoke screen, and dropping one was done on evidence rather than assumption.
+
+### Three model families "failed" the same item with the same answer
+
+In the smoke screen, g13 and g19 failed on models from different families that all returned the same, correct numbers. The items were grading representation (month labels, a fraction versus a percentage), not correctness. The audit rule since then: a failure shared across model families is investigated before it is believed. The fix was explicit per-item alternates with tests pinning their shape, not a looser grader (D33).
+
+### The validator stopped a model-generated DELETE
+
+Asked to delete cancelled orders, allam-2-7b generated a `DELETE` instead of refusing. The sqlglot validator rejected it (`FORBIDDEN_WRITE`), and the user saw the correct read-only refusal. It is the "prompt is not a security boundary" design working on real output. The grader still counts it as a model failure, because a model that writes `DELETE` is not the model to choose.
+
 ## Known limitations
 
 | # | Limitation | When it bites |
