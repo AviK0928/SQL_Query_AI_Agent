@@ -1,10 +1,10 @@
 {
- "role": "sql_repair",
- "model": "qwen/qwen3.8-27b",
+ "role": "synthesizer",
+ "model": "openai/gpt-oss-120b",
  "production_model": "openai/gpt-oss-120b",
  "repeats": 3,
  "suites": [
-  "repair"
+  "synthesizer"
  ],
  "ids": [],
  "temperature": 0,
@@ -22,7 +22,7 @@
   "answer": "answer@3c3a3566"
  },
  "datasets": {
-  "repair": "54978e241dcb"
+  "synthesizer": "403d2d0085c4"
  },
- "started_at": "2026-09-26T14:28:59+00:00"
+ "started_at": "2026-09-26T14:38:32+00:00"
 }
