@@ -420,6 +420,39 @@ def run(
 # --- report ----------------------------------------------------------------------------------
 
 
+def catalog_entry(reports: Path, model: str, run_date: str) -> dict[str, Any] | None:
+    """The model's entry in the newest catalog snapshot taken on or before the run date.
+
+    Snapshots are `<reports>/<YYYY-MM-DD>-catalog/models.json` (the SDK's models.list()).
+    None when no snapshot covers the date or the model is not listed: an unverified
+    gate is not a pass (MODEL_SELECTION.md section 1).
+    """
+    snaps = sorted(
+        p for p in reports.glob("*-catalog/models.json") if p.parent.name[:10] <= run_date
+    )
+    if not snaps:
+        return None
+    data = json.loads(snaps[-1].read_text()).get("data", [])
+    return next((m for m in data if m.get("id") == model), None)
+
+
+def context_fits(run_dir: Path, model: str, window: int | None) -> bool:
+    """Context gate: every logged call to `model` in this run fitted its context window.
+
+    Uses the call log's measured input + output tokens. False when the window is unknown
+    or the model made no logged call: an unverified gate is not a pass.
+    """
+    path = run_dir / "calls.jsonl"
+    if not window or not path.exists():
+        return False
+    used = [
+        int(c.get("gen_ai.usage.input_tokens") or 0) + int(c.get("gen_ai.usage.output_tokens") or 0)
+        for c in (json.loads(line) for line in path.read_text().splitlines() if line.strip())
+        if c.get("gen_ai.request.model") == model
+    ]
+    return bool(used) and max(used) <= window
+
+
 def write_report(run_dir: Path) -> str:
     manifest = json.loads((run_dir / "manifest.json").read_text())
     latest: dict[tuple[str, str, int], dict[str, Any]] = {}
@@ -429,7 +462,18 @@ def write_report(run_dir: Path) -> str:
     records = [r for r in latest.values() if r["status"] == "ok"]
     errors = [r for r in latest.values() if r["status"] != "ok"]
     role, model = manifest["role"], manifest["model"]
-    cand = sc.score_candidate(model, role, records, manifest["limits"], resamples=1000)
+    # Gates are computed, never defaulted: availability from the dated catalog snapshot,
+    # context from the call log's measured tokens (MODEL_SELECTION.md section 1).
+    entry = catalog_entry(run_dir.parent, model, run_dir.name[:10])
+    cand = sc.score_candidate(
+        model,
+        role,
+        records,
+        manifest["limits"],
+        available=entry is not None and bool(entry.get("active", True)),
+        context_ok=context_fits(run_dir, model, (entry or {}).get("context_window")),
+        resamples=1000,
+    )
     weights = sc.ROLES[role][0]
 
     lines = [
@@ -515,12 +559,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--role", required=True, choices=sorted(ROLE_SUITES))
-    p.add_argument("--model", required=True)
+    p.add_argument("--role", choices=sorted(ROLE_SUITES))
+    p.add_argument("--model")
     p.add_argument("--suites", nargs="*", help="default: the role's suites")
     p.add_argument("--repeats", type=int, default=1)
     p.add_argument("--ids", nargs="*", help="run only these item ids")
-    p.add_argument("--tag", required=True)
+    p.add_argument("--tag")
     p.add_argument("--min-interval", type=float, default=12.0)
     p.add_argument("--yes", action="store_true")
     p.add_argument("--report-only", metavar="RUN_DIR", help="rebuild report.md; no API calls")
@@ -528,6 +572,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.report_only:
         print(write_report(Path(args.report_only)))
         return 0
+    # Required for a real run only; --report-only rebuilds an existing run's report.
+    missing = [f"--{name}" for name in ("role", "model", "tag") if not getattr(args, name)]
+    if missing:
+        p.error("the following arguments are required: " + ", ".join(missing))
     suites = args.suites or list(ROLE_SUITES[args.role])
     run_dir, code = run(
         role=args.role,
