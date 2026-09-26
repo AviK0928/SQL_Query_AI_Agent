@@ -41,7 +41,7 @@ HERE = Path(__file__).resolve().parent
 DATASETS = HERE / "datasets"
 REPORTS = HERE / "reports"
 SUITES = {
-    "golden": "golden_v1.jsonl",
+    "golden": "golden_v2.jsonl",
     "adversarial": "adversarial_v1.jsonl",
     "repair": "repair_v1.jsonl",
     "synthesizer": "synthesizer_v1.jsonl",
@@ -70,6 +70,17 @@ def reference(sql: str, db_path: Path) -> tuple[int, list[list[Any]]]:
         return len(cur.description or []), [list(r) for r in cur.fetchall()]
     finally:
         con.close()
+
+
+def references(item: dict[str, Any], db_path: Path) -> list[list[list[Any]]]:
+    """Result rows of the reference and of each accepted alternate (golden_v2).
+
+    An alternate may differ from the reference only in representation (a month
+    label, a fraction instead of a percentage); tests/unit/test_golden_v2.py
+    enforces the same column and row counts.
+    """
+    sqls = [item["reference_sql"], *item.get("alt_reference_sql", [])]
+    return [reference(sql, db_path)[1] for sql in sqls]
 
 
 def sha(path: Path) -> str:
@@ -151,8 +162,10 @@ def grade_agent_item(
         ref_cols, ref_rows = reference(item["reference_sql"], db_path)
         got = result.get("rows") or []
         if kind == "sql":
-            graded["correct"] = not result.get("error") and g.execution_match(
-                got, ref_rows, order_matters=item.get("order_matters", False)
+            # golden_v2: an item may list alternates that differ only in representation.
+            graded["correct"] = not result.get("error") and any(
+                g.execution_match(got, ref, order_matters=item.get("order_matters", False))
+                for ref in references(item, db_path)
             )
             if got:
                 got_cols = len(result.get("columns") or [])
