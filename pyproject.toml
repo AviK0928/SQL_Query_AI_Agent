@@ -50,9 +50,9 @@ packages = ["app"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]                # bare `pytest` works; no more `python -m` requirement
-addopts = "-ra --strict-markers --strict-config"
+addopts = "-ra --strict-markers --strict-config -m 'not live'"  # live: pytest -m live
 markers = [
-    "live: calls the real Groq API; never selected by default",
+    "live: calls the real Groq API; deselected by default, run with `pytest -m live`",
 ]
 
 # --- coverage ------------------------------------------------------------

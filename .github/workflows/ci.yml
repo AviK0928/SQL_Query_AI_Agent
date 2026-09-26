@@ -2,7 +2,7 @@
 #
 # Never calls Groq: no secrets are exposed to this workflow, and tests/conftest.py
 # blocks and records any network attempt (T1). Live evals run only from a
-# separate, manually dispatched workflow (Phase 10).
+# separate, manually dispatched workflow (eval.yml, D32).
 #
 # Action versions are pinned to major tags; Dependabot (.github/dependabot.yml)
 # proposes updates weekly.
@@ -25,7 +25,7 @@ concurrency:
 env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONDONTWRITEBYTECODE: "1"
-  MIN_TESTS: "226"  # raise deliberately when tests are added; CI fails if the count drops (T4)
+  MIN_TESTS: "508"  # raise deliberately when tests are added; CI fails if the count drops (T4)
 
 jobs:
   lint:

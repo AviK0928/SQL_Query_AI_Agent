@@ -427,6 +427,34 @@ the Phase 6 harness, where the new grading is measured on its own.
 
 ---
 
+### Groq's edge rejected Python's default HTTP client
+
+The model-catalog call returned 403 through `urllib` while the same key had just made successful calls through the `groq` SDK. The 403 comes from the edge, not the API: Python's default user agent is refused before the key is checked. Catalog checks now use the SDK, which is also the production path.
+
+### The model catalog was smaller than expected
+
+Of the 11 models listed on 26 Sep 2026, only 4 generate text; the rest are speech, text-to-speech, or safety classifiers. That narrows the choice, so every text model was put through the smoke screen, and dropping one was done on evidence rather than assumption.
+
+### Three model families "failed" the same item with the same answer
+
+In the smoke screen, g13 and g19 failed on models from different families that all returned the same, correct numbers. The items were grading representation (month labels, a fraction versus a percentage), not correctness. The audit rule since then: a failure shared across model families is investigated before it is believed. The fix was explicit per-item alternates with tests pinning their shape, not a looser grader (D33).
+
+### The validator stopped a model-generated DELETE
+
+Asked to delete cancelled orders, allam-2-7b generated a `DELETE` instead of refusing. The sqlglot validator rejected it (`FORBIDDEN_WRITE`), and the user saw the correct read-only refusal. It is the "prompt is not a security boundary" design working on real output. The grader still counts it as a model failure, because a model that writes `DELETE` is not the model to choose.
+
+### A gate that always said yes
+
+Two selection gates were defaulted to `True` and never computed, so every report showed a pass nobody had checked. It surfaced while checking a real worry (could a 4,096-token model hold a 200-row answer prompt?) by reading how the gate was computed. The fix computes both gates from evidence and treats "unverified" as a failure. The re-render changed nothing, but the passes are now evidence rather than defaults.
+
+### The best model was not eligible
+
+qwen3.8-27b won the generator full run (0.898) and the synthesizer suite (1.000), but Groq lists it as Preview. The gate written before any results says a Preview model cannot be a primary, so it isn't one. It is kept for re-selection on promotion, and as the natural Phase 7 judge.
+
+### The repair prompt never saw the business rules
+
+Every model failed the same three revenue repairs, and for once the items were right: the repair prompt had the schema but not the rule that revenue excludes cancelled orders. An eval found a production bug that no unit test could, because it lives in what the model is told, not in the code.
+
 ## Known limitations
 
 | # | Limitation | When it bites |
