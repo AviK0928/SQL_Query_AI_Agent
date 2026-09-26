@@ -87,3 +87,12 @@ deprecated; a new model appears in the catalog; a prompt changes materially
 ## Results
 
 Pending: the Phase 6 selection runs. Reports: `evals/reports/`.
+
+### synthesizer: `openai/gpt-oss-120b` (D37)
+Tied with gpt-oss-20b on correctness (1.000); won on efficiency. qwen3.8-27b (1.000) is excluded as Preview (D39).
+
+### sql_repair: `openai/gpt-oss-120b` (D38)
+Tied on repair success (0.700; capped by the prompt defect L14); won on efficiency (p95 0.84 s).
+
+### sql_generator: pending
+qwen3.8-27b full run: 0.898 (0.839–0.940), but Preview, so not eligible as a primary (D39). The gpt-oss-120b full run on golden_v2 is next; it is the evidence for the choice and the Phase 7 baseline.

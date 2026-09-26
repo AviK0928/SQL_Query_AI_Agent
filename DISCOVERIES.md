@@ -443,6 +443,18 @@ In the smoke screen, g13 and g19 failed on models from different families that a
 
 Asked to delete cancelled orders, allam-2-7b generated a `DELETE` instead of refusing. The sqlglot validator rejected it (`FORBIDDEN_WRITE`), and the user saw the correct read-only refusal. It is the "prompt is not a security boundary" design working on real output. The grader still counts it as a model failure, because a model that writes `DELETE` is not the model to choose.
 
+### A gate that always said yes
+
+Two selection gates were defaulted to `True` and never computed, so every report showed a pass nobody had checked. It surfaced while checking a real worry (could a 4,096-token model hold a 200-row answer prompt?) by reading how the gate was computed. The fix computes both gates from evidence and treats "unverified" as a failure. The re-render changed nothing, but the passes are now evidence rather than defaults.
+
+### The best model was not eligible
+
+qwen3.8-27b won the generator full run (0.898) and the synthesizer suite (1.000), but Groq lists it as Preview. The gate written before any results says a Preview model cannot be a primary, so it isn't one. It is kept for re-selection on promotion, and as the natural Phase 7 judge.
+
+### The repair prompt never saw the business rules
+
+Every model failed the same three revenue repairs, and for once the items were right: the repair prompt had the schema but not the rule that revenue excludes cancelled orders. An eval found a production bug that no unit test could, because it lives in what the model is told, not in the code.
+
 ## Known limitations
 
 | # | Limitation | When it bites |
