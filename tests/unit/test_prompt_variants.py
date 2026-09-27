@@ -86,6 +86,16 @@ def test_repair_run_sends_and_records_the_override(test_settings, tmp_path):
     assert manifest["prompt_ids"]["sql_gen"] == prompts.SQL_PROMPT_ID
 
 
-def test_agent_suites_refuse_overrides(test_settings, tmp_path):
+def test_agent_suites_accept_overrides_and_record_them(test_settings, tmp_path):
+    """Since D51 the agent suites pass overrides to the Agent (previously refused)."""
+    llm = FakeLLM("SELECT COUNT(*) FROM customers", "There are 20 customers.")
+    run_dir, code = _run(test_settings, tmp_path, ["golden"], ["g04"], llm, {"sql_gen": 1})
+    assert code == 0
+    assert llm.calls[0][0]["content"] == system_prompt("sql_gen", 1)[0]
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    assert manifest["prompt_overrides"] == {"sql_gen": 1}
+
+
+def test_role_suites_refuse_prompts_they_never_send(test_settings, tmp_path):
     with pytest.raises(SystemExit, match="do not apply"):
-        _run(test_settings, tmp_path, ["golden"], ["g04"], FakeLLM(), {"sql_repair": 2})
+        _run(test_settings, tmp_path, ["repair"], ["r02"], FakeLLM(), {"sql_gen": 1})

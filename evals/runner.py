@@ -51,9 +51,15 @@ ROLE_SUITES = {
     "sql_repair": ("repair",),
     "synthesizer": ("synthesizer",),
 }
-# Prompt overrides (--prompt NAME=VERSION) reach only the suites that build their
-# messages here; the agent suites run production's ACTIVE_VERSIONS.
-OVERRIDABLE = {"repair": "sql_repair", "synthesizer": "answer"}
+# Prompt overrides (--prompt NAME=VERSION): the role suites build their own
+# messages; the agent suites pass the override to the Agent (D51), which can
+# replace any of its three system prompts.
+OVERRIDABLE = {
+    "repair": {"sql_repair"},
+    "synthesizer": {"answer"},
+    "golden": {"sql_gen", "sql_repair", "answer"},
+    "adversarial": {"sql_gen", "sql_repair", "answer"},
+}
 EST_CALLS = {"golden": 2.2, "adversarial": 1.0, "repair": 1.0, "synthesizer": 1.0}
 EST_TOKENS_PER_CALL = 700
 
@@ -294,7 +300,7 @@ def run(
     from app.sql.validator import validate_sql
 
     overrides = dict(prompt_versions or {})
-    allowed = {OVERRIDABLE[s] for s in suites if s in OVERRIDABLE}
+    allowed = set().union(*(OVERRIDABLE.get(s, set()) for s in suites))
     if set(overrides) - allowed:
         raise SystemExit(
             f"prompt overrides {sorted(set(overrides) - allowed)} do not apply to suites "
@@ -387,7 +393,7 @@ def run(
             if suite in ("golden", "adversarial"):
                 if repeat not in agents:
                     recorder = Recorder(make_llm(settings))
-                    agents[repeat] = Agent(settings, llm=recorder)
+                    agents[repeat] = Agent(settings, llm=recorder, prompt_versions=overrides)
                 agent = agents[repeat]
                 agent.llm.replies.clear()
                 result = ask_all_turns(agent, item["turns"])
@@ -633,7 +639,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--prompt",
         action="append",
         metavar="NAME=VERSION",
-        help="measure a released, inactive prompt version (repair and synthesizer suites)",
+        help="measure a released, inactive prompt version (D49, D51)",
     )
     p.add_argument("--report-only", metavar="RUN_DIR", help="rebuild report.md; no API calls")
     p.add_argument(

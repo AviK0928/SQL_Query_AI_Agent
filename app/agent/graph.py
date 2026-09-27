@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from langgraph.graph import END, StateGraph
@@ -40,6 +41,7 @@ from app.prompts import (
     build_retry_messages,
     build_sql_messages,
 )
+from app.prompts.variants import system_prompt
 from app.sql.errors import USER_MESSAGES, SqlErrorCode, SqlSafetyError
 from app.sql.executor import ReadOnlyExecutor
 from app.sql.validator import validate_sql
@@ -92,8 +94,13 @@ class Agent:
         llm: Any = None,
         db: Database | None = None,
         executor: ReadOnlyExecutor | None = None,
+        prompt_versions: Mapping[str, int] | None = None,
     ):
+        """prompt_versions measures released, inactive prompt versions in evals
+        (D51). Production never passes it and runs ACTIVE_VERSIONS."""
         self.settings = settings
+        # name -> (system text, prompt id); rendered once, so a bad version fails here.
+        self._variants = {n: system_prompt(n, v) for n, v in (prompt_versions or {}).items()}
         self.llm = llm if llm is not None else build_llm(settings)
         self.db = db if db is not None else Database.from_settings(settings)
         self.executor = (
@@ -106,6 +113,13 @@ class Agent:
         self._graph = self._build_graph()
 
     # --- model calls ----------------------------------------------------
+
+    def _prompt(self, name, messages, active_id):
+        """The messages and prompt id to send: production's, or an eval override's."""
+        if name not in self._variants:
+            return messages, active_id
+        text, variant_id = self._variants[name]
+        return [{"role": "system", "content": text}, *messages[1:]], variant_id
 
     def _complete(self, state, role, messages, prompt_id):
         """One model call; returns (text, usage including this call)."""
@@ -130,8 +144,10 @@ class Agent:
 
     def generate_sql(self, state):
         """LLM call 1: question -> SQL, or a token (READ_ONLY, CLARIFY, OUT_OF_SCOPE)."""
-        messages = build_sql_messages(state["question"], state.get("history"))
-        raw, usage = self._complete(state, LlmRole.SQL_GENERATOR, messages, SQL_PROMPT_ID)
+        messages, prompt_id = self._prompt(
+            "sql_gen", build_sql_messages(state["question"], state.get("history")), SQL_PROMPT_ID
+        )
+        raw, usage = self._complete(state, LlmRole.SQL_GENERATOR, messages, prompt_id)
         return {"reply": _clean_sql(raw), "usage": usage}
 
     def classify(self, state):
@@ -186,10 +202,14 @@ class Agent:
 
     def retry(self, state):
         """LLM call 2 (optional): show the model its error and ask for a fix."""
-        messages = build_retry_messages(
-            state["question"], state.get("sql") or "", state.get("error_detail") or ""
+        messages, prompt_id = self._prompt(
+            "sql_repair",
+            build_retry_messages(
+                state["question"], state.get("sql") or "", state.get("error_detail") or ""
+            ),
+            RETRY_PROMPT_ID,
         )
-        raw, usage = self._complete(state, LlmRole.SQL_REPAIR, messages, RETRY_PROMPT_ID)
+        raw, usage = self._complete(state, LlmRole.SQL_REPAIR, messages, prompt_id)
         text = _clean_sql(raw)
         cleared = {
             "error": None,
@@ -219,15 +239,19 @@ class Agent:
             # A fixed message per code: database internals never reach the user.
             return {"answer": USER_MESSAGES[SqlErrorCode(state["error"])]}
 
-        messages = build_answer_messages(
-            state["question"],
-            state["columns"],
-            state["rows"],
-            state.get("truncated", False),
-            state.get("limit_reached", False),
+        messages, prompt_id = self._prompt(
+            "answer",
+            build_answer_messages(
+                state["question"],
+                state["columns"],
+                state["rows"],
+                state.get("truncated", False),
+                state.get("limit_reached", False),
+            ),
+            ANSWER_PROMPT_ID,
         )
         try:
-            text, usage = self._complete(state, LlmRole.SYNTHESIZER, messages, ANSWER_PROMPT_ID)
+            text, usage = self._complete(state, LlmRole.SYNTHESIZER, messages, prompt_id)
         except LlmError as exc:
             # The query ran and its rows are real; only the summary is missing.
             return {"answer": SUMMARY_UNAVAILABLE_REPLY, "error": exc.code.value}

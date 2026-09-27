@@ -153,7 +153,7 @@ prints its value (S3). Environment variables override `.env`.
 pytest -q
 ```
 
-**621 tests (T19), no API key needed, no network calls.** The language model is
+**626 tests (T20), no API key needed, no network calls.** The language model is
 replaced by a scripted fake. The suite is offline by construction, not by
 convention: a guard in `tests/conftest.py` removes every setting from the
 environment and blocks and records any non-loopback network attempt, failing
@@ -313,6 +313,7 @@ recovered and are listed as such rather than invented.
 | D48 | Phase 7 baseline on the new measures, extending D41 without regenerating any answer: judge `qwen/qwen3.8-27b` (rubric `response.v1`) on the 35 answered items of repeat 0, trusted criteria only (D46): faithfulness 4.74 (pass 91%), relevance 5.00 (pass 100%), completeness 4.77 (pass 94%), clarity 4.91 (pass 100%); 35 verdicts, 26 answered from the calibration cache. False partial-result warnings (D47) over all 3 repeats: 17 of 107 answers. Experiments are judged on repeat 0 only, the same way; consistency stays measured by the deterministic metrics over all repeats. | `evals/reports/2026-09-27-judge-d41-qwen3.8-27b/` |
 | D49 | Prompt experiments measure a released but inactive version: `python -m evals.runner … --prompt NAME=VERSION` renders it exactly as production would (`app/prompts/variants.py`) and records the measured ids and the override in the run's manifest. Overrides apply only to the repair and synthesizer suites, which build their own messages; the agent suites always run `ACTIVE_VERSIONS`, so a generator-prompt experiment activates the candidate on its branch instead. A candidate becomes active only after its experiment is recorded in PROMPTS.md. | `evals/runner.py`, `app/prompts/variants.py` |
 | D50 | Experiment 1 kept: the repair prompt v2 (`sql_repair@cbe7c9f7`) adds the revenue and cancelled-order rules (D45 wording) to v1, changing nothing else. On the repair suite (gpt-oss-120b, 10 items x 3 repeats, temperature 0, 12 s pacing, as the 26 Sep baseline) repair success rose from 0.700 to 1.000: r01, r08 and r10 went from 0/3 to 3/3, and no item that passed under v1 failed. Decision rule fixed before the run: keep only if success rises and nothing regresses. Resolves L14. The agent path is re-checked with every accepted change in the final Phase 7 run. | `app/prompts/sql_repair.v2.md`, `evals/reports/2026-09-27-exp1-repair-v2/` |
+| D51 | Prompt overrides reach the agent: `Agent(..., prompt_versions={name: version})` replaces the system prompt and logged id of `sql_gen`, `sql_repair` or `answer` for that agent only, rendered once at construction so a bad name or version fails before any call. Production never passes it and runs `ACTIVE_VERSIONS`. The runner passes `--prompt` to the golden and adversarial suites, so a generator-prompt candidate is measured without being activated (this supersedes D49's "activate on the branch"); the role suites still refuse prompts they never send. | `app/agent/graph.py`, `evals/runner.py` |
 
 ### Limitations
 
@@ -374,6 +375,7 @@ recovered and are listed as such rather than invented.
 | T17 | 603 offline tests (587 at T16, plus 16 for `false_disclosure`: 10 baseline answers from calibration, 3 ordinary uses of "only" and "first", number words, the synthesizer path, and a runner run checking the record and the report line). `MIN_TESTS` raised to 603 (T4). | `tests/unit/test_false_disclosure.py` |
 | T18 | 609 offline tests (603 at T17, plus 6 for judging a whole run: the D41 selection pinned at 35 and 107 answered items, calibration cases a subset of it, the repeat filter and resume by item and repeat, the summary maths, and pacing skipped on cache hits). `MIN_TESTS` raised to 609 (T4). | `tests/unit/test_judge_baseline.py` |
 | T19 | 621 offline tests (609 at T18, plus 12: 11 for prompt variants, and one more case of the released-file hash test for `sql_repair.v2.md`; first recorded as 620 by mistake. The 11 cover: active versions render byte-identical to production, repair v2 adds only its rules block, override parsing, the override sent and recorded on a repair run, and the agent suites refusing overrides). `MIN_TESTS` raised to 621 (T4). | `tests/unit/test_prompt_variants.py` |
+| T20 | 626 offline tests (621 at T19, plus 4 for agent overrides: only the named prompt and id change and every other message is byte-identical, the default sends the active prompts, a bad name or version fails at construction; plus 1 for the role suites refusing prompts they never send). One expectation changed on purpose: agent suites now accept and record overrides instead of refusing them (D51). `MIN_TESTS` raised to 626 (T4). | `tests/unit/test_agent_prompt_versions.py`, `tests/unit/test_prompt_variants.py` |
 
 ### Data handling
 
