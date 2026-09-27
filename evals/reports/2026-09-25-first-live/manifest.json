@@ -1,0 +1,34 @@
+{
+ "role": "sql_generator",
+ "model": "openai/gpt-oss-120b",
+ "production_model": "openai/gpt-oss-120b",
+ "repeats": 1,
+ "suites": [
+  "golden"
+ ],
+ "ids": [
+  "g01",
+  "g04",
+  "g18",
+  "g22",
+  "g29"
+ ],
+ "temperature": 0,
+ "min_interval_s": 12.0,
+ "commit": "8b1550c",
+ "limits": {
+  "rpm": 30,
+  "rpd": 1000,
+  "tpm": 8000,
+  "tpd": 200000
+ },
+ "prompt_ids": {
+  "sql_gen": "sql_gen@5fb4fe06",
+  "sql_repair": "sql_repair@a5c30252",
+  "answer": "answer@3c3a3566"
+ },
+ "datasets": {
+  "golden": "c3b8bc03f4e3"
+ },
+ "started_at": "2026-09-25T14:30:54+00:00"
+}

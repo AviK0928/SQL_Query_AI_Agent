@@ -1,0 +1,28 @@
+{
+ "role": "sql_repair",
+ "model": "qwen/qwen3.8-27b",
+ "production_model": "openai/gpt-oss-120b",
+ "repeats": 3,
+ "suites": [
+  "repair"
+ ],
+ "ids": [],
+ "temperature": 0,
+ "min_interval_s": 12.0,
+ "commit": "1a78bfa",
+ "limits": {
+  "rpm": 30,
+  "rpd": 1000,
+  "tpm": 8000,
+  "tpd": 200000
+ },
+ "prompt_ids": {
+  "sql_gen": "sql_gen@5fb4fe06",
+  "sql_repair": "sql_repair@a5c30252",
+  "answer": "answer@3c3a3566"
+ },
+ "datasets": {
+  "repair": "54978e241dcb"
+ },
+ "started_at": "2026-09-26T14:28:59+00:00"
+}
