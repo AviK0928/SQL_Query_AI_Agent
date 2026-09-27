@@ -79,3 +79,33 @@ Found by auditing the smoke screen (items that failed on several model families)
 **Gates:** since `c2faead`, availability and context are computed from the dated catalog snapshot and the call log (P18). All 26 Sep reports were re-rendered, with identical results. The 25 Sep first-live report predates any snapshot; it was a plumbing check and is not scored.
 
 **Decisions:** synthesizer and sql_repair = gpt-oss-120b (D37, D38).
+
+## Full run: gpt-oss-120b as sql_generator (2026-09-27)
+
+- **Setup:** identical to qwen's full run (golden_v2, adversarial, 3 repeats, 20 s, temperature 0) at commit `0114cc0`. Only reporting code differs from qwen's `39ceff5`; prompts and datasets are identical.
+- **Report:** `evals/reports/2026-09-27-full-gpt-oss-120b/`.
+- **Total 0.819** (0.729–0.898). All gates computed and passing; 144 records ok; mean 1,138 tokens per question; p50 1.07 s, p95 2.27 s.
+
+| Factor | gpt-oss-120b | qwen3.8-27b |
+|---|---|---|
+| Execution accuracy | 0.899 | 0.970 |
+| Hard tiers | 0.741 | 1.000 |
+| Refusal and clarity | 0.792 | 0.875 |
+| Injection resistance | 1.000 | 0.857 |
+| Column minimisation | 0.663 | 0.724 |
+| Consistency | 0.848 | 1.000 |
+
+**Failures:**
+
+| Item | Repeats failed | Reading |
+|---|---|---|
+| g14 (T5), g20 (T7) | 3/3 each | Model-specific; qwen answers both correctly, so the items are answerable. |
+| g21 (T7) | 1/3 | Inconsistency across repeats. |
+| g18 (T6, tie) | 3/3 | Shared with qwen: `LIMIT 1` hides a tie (L13). |
+| g22, g24 (T8) | 3/3, 2/3 | The `clarify` rule (L12). In 2 of 3 g22 answers, 120b stated its assumption ("based on total spend"), which is evidence for the L12 decision. |
+
+Failures shared across model families were audited on 26 Sep. Failures specific to one family are presumed real, because the other family answers the item.
+
+**Decision:** sql_generator = gpt-oss-120b (D40). **This run is the Phase 7 baseline (D41).**
+
+**Phase 7 targets:** repair-prompt domain rules (L14), ties (g18), clarify or state the assumption (L12), g14/g20/g21 SQL errors, consistency, column minimisation, and the suspected truncation false-disclosure (L13).

@@ -86,7 +86,7 @@ deprecated; a new model appears in the catalog; a prompt changes materially
 
 ## Results
 
-Pending: the Phase 6 selection runs. Reports: `evals/reports/`.
+Selection completed 27 Sep 2026: every role on `openai/gpt-oss-120b` (D37, D38, D40). Reports: `evals/reports/`.
 
 ### synthesizer: `openai/gpt-oss-120b` (D37)
 Tied with gpt-oss-20b on correctness (1.000); won on efficiency. qwen3.8-27b (1.000) is excluded as Preview (D39).
@@ -94,5 +94,7 @@ Tied with gpt-oss-20b on correctness (1.000); won on efficiency. qwen3.8-27b (1.
 ### sql_repair: `openai/gpt-oss-120b` (D38)
 Tied on repair success (0.700; capped by the prompt defect L14); won on efficiency (p95 0.84 s).
 
-### sql_generator: pending
-qwen3.8-27b full run: 0.898 (0.839–0.940), but Preview, so not eligible as a primary (D39). The gpt-oss-120b full run on golden_v2 is next; it is the evidence for the choice and the Phase 7 baseline.
+### sql_generator: `openai/gpt-oss-120b` (D40)
+Full run (golden_v2 plus adversarial, 3 repeats, 27 Sep 2026): 0.819 (0.729–0.898), correctness 0.788–0.983, all gates pass. qwen3.8-27b scored 0.898 (0.839–0.940) but is Preview (D39). Under §3 they would tie, and the tie would go to qwen on correctness, so qwen's promotion to Production is a re-selection trigger. This run is the Phase 7 baseline (D41).
+
+**Configuration:** unchanged. `GROQ_MODEL=openai/gpt-oss-120b`; `LLM_ROLE_MODELS` empty, so every role resolves to it.
