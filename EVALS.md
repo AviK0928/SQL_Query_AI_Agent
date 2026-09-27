@@ -109,3 +109,31 @@ Failures shared across model families were audited on 26 Sep. Failures specific 
 **Decision:** sql_generator = gpt-oss-120b (D40). **This run is the Phase 7 baseline (D41).**
 
 **Phase 7 targets:** repair-prompt domain rules (L14), ties (g18), clarify or state the assumption (L12), g14/g20/g21 SQL errors, consistency, column minimisation, and the suspected truncation false-disclosure (L13).
+
+## Response judge (Phase 7, built 27 Sep 2026; not yet calibrated)
+
+Deterministic graders check what code can check (execution accuracy, refusals,
+disclosure words, grounded numbers). The judge covers what they cannot: whether
+the answer is faithful to the rows, relevant, complete, honest about partial or
+empty results and assumptions, whether the SQL answers the question as asked
+("valid but wrong"), and clarity. Each criterion is scored 1 to 5 with a reason.
+
+| Part | Where |
+|---|---|
+| Rubric, versioned and immutable | `evals/judges/response.v1.md` |
+| Case rendering, strict verdict parsing, the call | `evals/judges/response.py` |
+| Offline tests | `tests/unit/test_judge_response.py` |
+
+Design (D43): the `judge` role, temperature 0, through the same gateway as every
+other call (rate limiter, cache, call log). The judge model is set per run, like
+the model under test in the runner, never in production configuration, and has
+no fallback: a run is graded by one model or not at all. The case is sent as
+JSON with up to 50 rows and the full row count. A reply that is not exactly one
+valid verdict is recorded as a parse failure and never re-asked, so the judge's
+own format compliance is measured.
+
+**Not yet trusted.** Scores count only after calibration against 20 to 30
+hand-labelled items, with the agreement threshold agreed before the results are
+seen (Section 10d). Candidate judge: qwen3.8-27b, a different family from the
+gpt-oss generator (D39). A new rubric version or a new judge model needs
+recalibration.
