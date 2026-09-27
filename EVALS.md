@@ -137,3 +137,24 @@ hand-labelled items, with the agreement threshold agreed before the results are
 seen (Section 10d). Candidate judge: qwen3.8-27b, a different family from the
 gpt-oss generator (D39). A new rubric version or a new judge model needs
 recalibration.
+
+### Calibration set and trust rule (D44)
+
+Fixed on 27 Sep 2026, before any judge score was seen.
+
+- **Items:** 26 cases from the baseline run (D41), repeat 0, every item that ran
+  SQL; per tier the first two by id, plus every item that failed a deterministic
+  check (g14, g18, g20, g22, g35). `evals/judges/calibration_v1.jsonl` holds each
+  case as the judge sees it: the stored SQL re-run to recover the rows and flags,
+  with the row count checked against the run.
+- **Labels:** by hand, blind to the judge, following
+  [`evals/judges/CALIBRATION.md`](evals/judges/CALIBRATION.md).
+- **Trust rule, per criterion:** the judge is within one point of the label on
+  at least 80% of items, and its pass/fail call (4-5 pass, 1-3 fail) matches on
+  at least 85%. A reply that failed to parse counts as a disagreement. A
+  criterion that misses either bar is not used in Phase 7 decisions until a
+  revised rubric passes; the bars are not lowered after the results.
+- **Commands:** `python -m evals.judges.run build | judge | agree` (the module
+  docstring has the flags). A judge run writes `manifest.json`,
+  `judgments.jsonl`, `calls.jsonl` and, after `agree`, `agreement.md` to
+  `evals/reports/<date>-<tag>/`.
