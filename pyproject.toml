@@ -145,6 +145,6 @@ strict_equality = true
 # app/sql/executor.py mutants are tested, selected by name on the command line;
 # all of app/ is listed so imports resolve inside mutmut's mutants/ copy.
 source_paths = ["app/"]
-also_copy = ["database/", "tests/"]
+also_copy = ["database/", "tests/", "evals/"]  # evals/: tests/unit imports it since Phase 6 (T24)
 pytest_add_cli_args_test_selection = ["tests/unit/"]
 pytest_add_cli_args = ["--no-cov", "-p", "no:cacheprovider"]
