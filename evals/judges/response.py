@@ -152,6 +152,7 @@ class JudgeResult:
     error: str | None
     raw: str
     tokens: int
+    cached: bool = False  # answered from the response cache: no call, no quota spent
 
 
 def judge_response(llm: _Llm, case: JudgeCase, *, request_id: str | None = None) -> JudgeResult:
@@ -165,7 +166,8 @@ def judge_response(llm: _Llm, case: JudgeCase, *, request_id: str | None = None)
         request_id=request_id,
     )
     tokens = reply.input_tokens + reply.output_tokens
+    cached = bool(getattr(reply, "cache_hit", False))
     try:
-        return JudgeResult(parse_verdict(reply.content), None, reply.content, tokens)
+        return JudgeResult(parse_verdict(reply.content), None, reply.content, tokens, cached)
     except JudgeParseError as exc:
-        return JudgeResult(None, str(exc), reply.content, tokens)
+        return JudgeResult(None, str(exc), reply.content, tokens, cached)

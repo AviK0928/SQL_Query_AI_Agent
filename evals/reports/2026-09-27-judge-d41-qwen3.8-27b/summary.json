@@ -1,0 +1,46 @@
+{
+ "judge_run": "2026-09-27-judge-d41-qwen3.8-27b",
+ "judged": 35,
+ "verdicts": 35,
+ "criteria": {
+  "faithfulness": {
+   "mean": 4.743,
+   "pass_rate": 0.914
+  },
+  "relevance": {
+   "mean": 5.0,
+   "pass_rate": 1.0
+  },
+  "completeness": {
+   "mean": 4.771,
+   "pass_rate": 0.943
+  },
+  "clarity": {
+   "mean": 4.914,
+   "pass_rate": 1.0
+  }
+ },
+ "false_disclosure": {
+  "flagged": 17,
+  "of": 107,
+  "items": [
+   "g07/r0",
+   "g16/r0",
+   "g17/r0",
+   "g25/r0",
+   "g35/r0",
+   "g07/r1",
+   "g13/r1",
+   "g16/r1",
+   "g17/r1",
+   "g25/r1",
+   "g35/r1",
+   "g07/r2",
+   "g13/r2",
+   "g16/r2",
+   "g17/r2",
+   "g25/r2",
+   "g35/r2"
+  ]
+ }
+}

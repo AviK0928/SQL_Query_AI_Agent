@@ -190,3 +190,23 @@ is recorded per answer and shown in every report ("False partial-result warnings
 k of n") and in the failures table, but not added to the score, so runs stay
 comparable with D41. On the calibration answers it flags g07, g35, g16, g17 and
 g25, and correctly leaves g18, g22 and g34, where rows really were withheld.
+
+## Phase 7 baseline on the new measures (D48)
+
+The D41 run (`2026-09-27-full-gpt-oss-120b`) judged without regenerating answers:
+each stored SQL re-run to rebuild the case, then judged on repeat 0 by
+`qwen/qwen3.8-27b` (run `2026-09-27-judge-d41-qwen3.8-27b`, 26 of 35 verdicts from the
+calibration cache).
+
+| Trusted criterion | Mean (1-5) | Pass rate (4-5) |
+|---|---|---|
+| faithfulness | 4.74 | 91% |
+| relevance | 5.00 | 100% |
+| completeness | 4.77 | 94% |
+| clarity | 4.91 | 100% |
+
+False partial-result warnings, all 3 repeats: **17 of 107**
+answers (g07/r0, g16/r0, g17/r0, g25/r0, g35/r0, g07/r1, g13/r1, g16/r1, g17/r1, g25/r1, g35/r1, g07/r2, g13/r2, g16/r2, g17/r2, g25/r2, g35/r2).
+
+Every prompt experiment reports these same figures, judged the same way, next to
+the D41 scores.
