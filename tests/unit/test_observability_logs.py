@@ -178,3 +178,22 @@ def test_sqlglot_warnings_never_reach_the_log(clean_root, capsys):
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert [line["event"] for line in lines] == ["an actual sqlglot error"]
     assert logging.getLogger("sqlglot").level == logging.ERROR
+
+
+def test_uvicorn_logs_become_json_and_its_access_log_is_silenced(clean_root, capsys):
+    """L24: uvicorn installs plain-text handlers before the app is built."""
+    server = logging.getLogger("uvicorn")
+    saved = list(server.handlers), server.propagate
+    server.handlers[:] = [logging.StreamHandler()]  # what uvicorn's dictConfig leaves
+    server.propagate = False
+    try:
+        configure_logging()
+        assert server.handlers == [] and server.propagate is True
+        logging.getLogger("uvicorn.error").warning("Invalid HTTP request received.")
+        logging.getLogger("uvicorn.access").info('1.2.3.4 - "GET /chat?q=x HTTP/1.1" 200')
+    finally:
+        server.handlers[:], server.propagate = saved
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [(line["logger"], line["event"]) for line in lines] == [
+        ("uvicorn.error", "Invalid HTTP request received.")
+    ]

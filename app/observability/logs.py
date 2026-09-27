@@ -33,12 +33,19 @@ REDACTED = "***"
 #   parsing a statement as a raw command, so model output could reach the logs (H2).
 # - HTTP clients log every request's full URL, query string included, at INFO:
 #   httpx (the Groq SDK), httpcore (its transport), httpx2 (the test client).
+# - uvicorn's access log duplicates the JSON `http.request` record in plain
+#   text, with the query string (L24).
 QUIET_LOGGERS = {
     "sqlglot": logging.ERROR,
     "httpx": logging.WARNING,
     "httpcore": logging.WARNING,
     "httpx2": logging.WARNING,
+    "uvicorn.access": logging.CRITICAL,
 }
+# Loggers that install their own plain-text handler before the app is built
+# (uvicorn does, then imports the app): their records are sent to the JSON
+# handler instead, so server errors and startup lines are JSON too (L24).
+ADOPTED_LOGGERS = ("uvicorn",)
 # Attributes every LogRecord has; anything else on a record came from `extra=`.
 _STANDARD_ATTRS = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime", "taskName"}
 
@@ -100,4 +107,8 @@ def configure_logging(*, secrets: Iterable[str] = (), level: int = logging.INFO)
     root.setLevel(level)
     for name, quiet_level in QUIET_LOGGERS.items():
         logging.getLogger(name).setLevel(quiet_level)
+    for name in ADOPTED_LOGGERS:
+        adopted = logging.getLogger(name)
+        adopted.handlers.clear()
+        adopted.propagate = True
     return handler

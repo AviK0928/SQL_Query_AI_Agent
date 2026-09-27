@@ -123,3 +123,6 @@ committed, so there is no database to provision. `GROQ_API_KEY` is set in the
 Render dashboard, never in the repository.
 
 The instance sleeps after 15 minutes idle; the next request takes 30-60 seconds.
+
+After a deploy, `python -m app.smoke <url>` checks `/health`; with `--question`
+it also asks one real question and checks its answer and request id (D57).
