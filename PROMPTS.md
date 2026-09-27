@@ -50,6 +50,7 @@ Rules (D42):
 |---|---|---|---|---|
 | `sql_gen` | v1 (with `schema.v1`) | `sql_gen@5fb4fe06` | Active; Phase 7 baseline | D41 |
 | `sql_repair` | v1 (with `schema.v1`) | `sql_repair@a5c30252` | Active; Phase 7 baseline | D41; repair run 26 Sep 2026 |
+| `sql_repair` | v2 (with `schema.v1`) | `sql_repair@cbe7c9f7` | Candidate: experiment 1 (L14), not active | Pending |
 | `answer` | v1 (with `answer_notes.v1`) | `answer@3c3a3566` | Active; Phase 7 baseline | D41; synthesizer run 26 Sep 2026 |
 
 v1 is the text in use since Phase 5, moved into files byte for byte: the ids

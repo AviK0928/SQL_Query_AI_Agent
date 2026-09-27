@@ -51,6 +51,9 @@ ROLE_SUITES = {
     "sql_repair": ("repair",),
     "synthesizer": ("synthesizer",),
 }
+# Prompt overrides (--prompt NAME=VERSION) reach only the suites that build their
+# messages here; the agent suites run production's ACTIVE_VERSIONS.
+OVERRIDABLE = {"repair": "sql_repair", "synthesizer": "answer"}
 EST_CALLS = {"golden": 2.2, "adversarial": 1.0, "repair": 1.0, "synthesizer": 1.0}
 EST_TOKENS_PER_CALL = 700
 
@@ -106,6 +109,17 @@ class Recorder:
         result = self.inner.complete(role, messages, **kwargs)
         self.replies.append((str(getattr(role, "value", role)), result.content))
         return result
+
+
+def parse_prompt_overrides(values: Sequence[str] | None) -> dict[str, int]:
+    """["sql_repair=2"] -> {"sql_repair": 2}."""
+    out: dict[str, int] = {}
+    for value in values or []:
+        name, sep, version = value.partition("=")
+        if not sep or not version.isdigit() or int(version) < 1:
+            raise ValueError(f"--prompt expects NAME=VERSION, got {value!r}")
+        out[name] = int(version)
+    return out
 
 
 def settings_for(base: Any, role: str, model: str, run_dir: Path, repeat: int) -> Any:
@@ -256,8 +270,12 @@ def run(
     today: str | None = None,
     sleep: Callable[[float], None] = time.sleep,
     confirm: Callable[[str], str] = input,
+    prompt_versions: dict[str, int] | None = None,
 ) -> tuple[Path, int]:
-    """Run, grade and report. Returns (run_dir, exit_code): 0 done, 1 aborted, 3 rate limited."""
+    """Run, grade and report. Returns (run_dir, exit_code): 0 done, 1 aborted, 3 rate limited.
+
+    prompt_versions measures a released but inactive prompt version (Phase 7
+    experiments); it applies only to suites in OVERRIDABLE."""
     from app.agent import Agent, build_llm
     from app.agent.nodes.classify import classify_reply
     from app.config import load_settings
@@ -270,9 +288,30 @@ def run(
         build_answer_messages,
         build_retry_messages,
     )
+    from app.prompts.variants import system_prompt
     from app.sql.errors import SqlSafetyError
     from app.sql.executor import ReadOnlyExecutor
     from app.sql.validator import validate_sql
+
+    overrides = dict(prompt_versions or {})
+    allowed = {OVERRIDABLE[s] for s in suites if s in OVERRIDABLE}
+    if set(overrides) - allowed:
+        raise SystemExit(
+            f"prompt overrides {sorted(set(overrides) - allowed)} do not apply to suites "
+            f"{list(suites)}; overridable: {OVERRIDABLE}"
+        )
+    variant = {name: system_prompt(name, v) for name, v in overrides.items()}
+    prompt_ids = {
+        "sql_gen": SQL_PROMPT_ID,
+        "sql_repair": RETRY_PROMPT_ID,
+        "answer": ANSWER_PROMPT_ID,
+    }
+    prompt_ids |= {name: pid for name, (_, pid) in variant.items()}
+
+    def with_system(messages: list[Any], name: str) -> list[Any]:
+        if name not in variant:
+            return messages
+        return [{"role": "system", "content": variant[name][0]}, *messages[1:]]
 
     base = base_settings or load_settings()
     make_llm = make_llm or build_llm
@@ -319,11 +358,8 @@ def run(
         "min_interval_s": min_interval,
         "commit": git_commit(),
         "limits": lim.model_dump(),
-        "prompt_ids": {
-            "sql_gen": SQL_PROMPT_ID,
-            "sql_repair": RETRY_PROMPT_ID,
-            "answer": ANSWER_PROMPT_ID,
-        },
+        "prompt_ids": prompt_ids,
+        "prompt_overrides": overrides,
         "datasets": {s: sha(DATASETS / SUITES[s]) for s in suites},
         "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
@@ -374,11 +410,14 @@ def run(
                 if suite == "repair":
                     reply = gateway.complete(
                         LlmRole.SQL_REPAIR,
-                        build_retry_messages(
-                            item["question"], item["broken_sql"], item["error_detail"]
+                        with_system(
+                            build_retry_messages(
+                                item["question"], item["broken_sql"], item["error_detail"]
+                            ),
+                            "sql_repair",
                         ),
                         temperature=0,
-                        prompt_id=RETRY_PROMPT_ID,
+                        prompt_id=prompt_ids["sql_repair"],
                     )
                     rows = None
                     try:
@@ -392,15 +431,18 @@ def run(
                 else:
                     reply = gateway.complete(
                         LlmRole.SYNTHESIZER,
-                        build_answer_messages(
-                            item["question"],
-                            item["columns"],
-                            item["rows"],
-                            item["truncated"],
-                            item["limit_reached"],
+                        with_system(
+                            build_answer_messages(
+                                item["question"],
+                                item["columns"],
+                                item["rows"],
+                                item["truncated"],
+                                item["limit_reached"],
+                            ),
+                            "answer",
                         ),
                         temperature=0,
-                        prompt_id=ANSWER_PROMPT_ID,
+                        prompt_id=prompt_ids["answer"],
                     )
                     graded = grade_synthesizer(item, reply.content)
                 record.update(
@@ -587,6 +629,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--tag")
     p.add_argument("--min-interval", type=float, default=12.0)
     p.add_argument("--yes", action="store_true")
+    p.add_argument(
+        "--prompt",
+        action="append",
+        metavar="NAME=VERSION",
+        help="measure a released, inactive prompt version (repair and synthesizer suites)",
+    )
     p.add_argument("--report-only", metavar="RUN_DIR", help="rebuild report.md; no API calls")
     p.add_argument(
         "--date", help="run-folder date YYYY-MM-DD; resumes a run begun on an earlier UTC day"
@@ -605,6 +653,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         except ValueError:
             p.error("--date must be YYYY-MM-DD")
     suites = args.suites or list(ROLE_SUITES[args.role])
+    try:
+        prompt_versions = parse_prompt_overrides(args.prompt)
+    except ValueError as exc:
+        p.error(str(exc))
     run_dir, code = run(
         role=args.role,
         model=args.model,
@@ -615,6 +667,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         yes=args.yes,
         min_interval=args.min_interval,
         today=args.date,
+        prompt_versions=prompt_versions,
     )
     print((run_dir / "report.md").read_text() if (run_dir / "report.md").exists() else "")
     return code

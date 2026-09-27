@@ -18,6 +18,7 @@ RELEASED = {
     "schema.v1.md": "5d12418fc0fb125e",
     "sql_gen.v1.md": "202fee36aef990b9",
     "sql_repair.v1.md": "d379da6f79a9da91",
+    "sql_repair.v2.md": "44f9fc7a337d3470",
     "answer.v1.md": "d519351408d8139e",
     "answer_notes.v1.toml": "004ae34058b803ad",
 }
