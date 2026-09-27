@@ -14,7 +14,7 @@ from app.prompts.loader import prompt_id
 # D41: the prompts of run 2026-09-27-full-gpt-oss-120b, the Phase 7 baseline.
 PINNED_IDS = {
     "sql_gen": "sql_gen@5fb4fe06",
-    "sql_repair": "sql_repair@a5c30252",
+    "sql_repair": "sql_repair@cbe7c9f7",  # v2 since experiment 1 (D50)
     "answer": "answer@3c3a3566",
 }
 

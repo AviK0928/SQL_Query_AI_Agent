@@ -49,8 +49,8 @@ Rules (D42):
 | Prompt | Version | Id | Status | Evidence |
 |---|---|---|---|---|
 | `sql_gen` | v1 (with `schema.v1`) | `sql_gen@5fb4fe06` | Active; Phase 7 baseline | D41 |
-| `sql_repair` | v1 (with `schema.v1`) | `sql_repair@a5c30252` | Active; Phase 7 baseline | D41; repair run 26 Sep 2026 |
-| `sql_repair` | v2 (with `schema.v1`) | `sql_repair@cbe7c9f7` | Candidate: experiment 1 (L14), not active | Pending |
+| `sql_repair` | v1 (with `schema.v1`) | `sql_repair@a5c30252` | Replaced by v2 (D50) | D41; repair run 26 Sep 2026 |
+| `sql_repair` | v2 (with `schema.v1`) | `sql_repair@cbe7c9f7` | Active since experiment 1 | D50; `2026-09-27-exp1-repair-v2` |
 | `answer` | v1 (with `answer_notes.v1`) | `answer@3c3a3566` | Active; Phase 7 baseline | D41; synthesizer run 26 Sep 2026 |
 
 v1 is the text in use since Phase 5, moved into files byte for byte: the ids
@@ -93,10 +93,11 @@ database error such as an unknown column, or an invalid `LIMIT`. A forbidden
 write, a stacked statement or a timeout is final and gets no repair (README
 D20).
 
-Text: [`sql_repair.v1.md`](app/prompts/sql_repair.v1.md): the schema, one
-corrected SELECT only, and `OUT_OF_SCOPE` if the schema cannot answer it. It
-does **not** carry the domain rules from call 1, so a repaired revenue query
-can include cancelled orders (L14, Phase 7 experiment 1).
+Text: [`sql_repair.v2.md`](app/prompts/sql_repair.v2.md): the schema, one
+corrected SELECT only, `OUT_OF_SCOPE` if the schema cannot answer it, and the
+two domain rules: revenue from `unit_price * quantity`, and cancelled orders
+excluded from money and units sold but counted as placed (D45). v1 lacked the
+rules, so repaired revenue queries included cancelled orders (L14, fixed by D50).
 
 The failed SQL and the error detail are sent with it. For database errors the
 detail contains SQLite's own message (`no such column: revenue`), which is more
@@ -193,3 +194,4 @@ before any change:
 | 25 Sep 2026 (Phase 4) | No prompt text changed (the seven prompt constants were compared with the committed versions). Each prompt now has an id derived from its text, sent with every model call for the cache key and the call log: `sql_gen@27e9e81d`, `sql_repair@a5c30252`, `answer@3c3a3566`. The three calls run under the roles `sql_generator`, `sql_repair` and `synthesizer`. | `app/prompts.py`, README D24 |
 | 25 Sep 2026 (Phase 5) | **Experiment: CLARIFY rule.** Hypothesis: an explicit rule stops the model silently guessing on ambiguous questions (baseline b08 guessed "best" = top 10 by spend). Change: one paragraph in the SQL prompt's SCOPE section (`sql_gen@27e9e81d` → `sql_gen@5fb4fe06`). Measured on the 15-item baseline, same grader: b08 changed from a silent guess to a clarifying question; the other 14 items unchanged; input tokens +1.3% (12,964 → 13,127). **Kept.** Caveat: one ambiguous item; Phase 6 checks for over-triggering on clear questions. | `evals/baseline/results/*_after-clarify.jsonl`, README D27 |
 | 27 Sep 2026 (Phase 7) | No prompt text changed. Prompts moved from `app/prompts.py` into versioned files (`app/prompts/*.v1.*`) with a loader, released-file hash pins and snapshot tests. The ids are unchanged: `sql_gen@5fb4fe06`, `sql_repair@a5c30252`, `answer@3c3a3566`, so D41 remains the baseline. | `app/prompts/`, README D42, T14 |
+| 27 Sep 2026 (Phase 7) | **Experiment 1: domain rules in the repair prompt.** Hypothesis: v1 lacks the revenue and cancelled-order rules, so repaired revenue queries include cancelled orders (L14; r01, r08 and r10 failed on every model). Change, one variable: `sql_repair.v2` appends a RULES block (`sql_repair@a5c30252` -> `sql_repair@cbe7c9f7`); same model, temperature, items and pacing as the baseline. Result: repair success 0.700 -> **1.000** (10 items x 3 repeats); r01, r08, r10 0/3 -> 3/3; no item regressed, including the order-count items r03, r05 and r06. **Kept** under the rule fixed before the run. | `evals/reports/2026-09-27-exp1-repair-v2/`, README D50 |

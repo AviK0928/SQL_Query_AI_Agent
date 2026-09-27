@@ -52,7 +52,7 @@ CLARIFY_TOKEN: Final = "CLARIFY"  # nosec B105
 ACTIVE_VERSIONS: Final[Mapping[str, int]] = {
     "schema": 1,
     "sql_gen": 1,
-    "sql_repair": 1,
+    "sql_repair": 2,
     "answer": 1,
     "answer_notes": 1,
 }
