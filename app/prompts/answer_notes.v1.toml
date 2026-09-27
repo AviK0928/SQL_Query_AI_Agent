@@ -1,0 +1,5 @@
+# Result notes appended to the synthesizer's user message (app/prompts/__init__.py).
+# {shown} is filled with str.format. Immutable once released: edit a copy as v2.
+rows_hidden = "(showing the first 20 of {shown} rows; do not describe these as the highest, lowest or total unless the query itself ordered or aggregated them)"
+truncated = "(results were truncated: more rows matched than the server returns, so these are not all the matching rows)"
+limit_reached = "(the query's LIMIT was reached, so more matching rows may exist; do not describe these as all of them)"
