@@ -106,8 +106,12 @@ to answer by filtering the logs on it (D55).
 
 Logs are JSON lines on stdout, one object per record
 (`app/observability/logs.py`). They record what happened and how long it took,
-never question text, SQL, rows or exception messages (H5). Tracing and metrics
-are added in the next Phase 9 steps.
+never question text, SQL, rows or exception messages (H5).
+
+What the app asks the LLM and what it gets back is in the LLM call log
+(`app/llm/calllog.py`): one line per call with the same `request_id`, and with
+`LLM_LOG_CONTENT=true` the messages and the reply, each clipped to
+`LLM_LOG_MAX_CHARS` (D56). There is no separate tracing or metrics system.
 
 ## Deployment
 

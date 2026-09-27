@@ -64,7 +64,8 @@ class Settings(BaseSettings):
     llm_timeout_s: PositiveFloat = 30.0  # per HTTP call to Groq
     llm_max_attempts: PositiveInt = 3  # per model, including the first try
     llm_cache_path: Path | None = None  # response cache; off unless set (dev, evals)
-    llm_log_content: bool = False  # log prompts and responses; off in production
+    llm_log_content: bool = False  # log prompts and responses (H3, D56)
+    llm_log_max_chars: PositiveInt = 4000  # per logged message or reply; longer text is clipped
     llm_log_path: Path | None = None  # JSONL call log; stdout when unset
 
     @field_validator("groq_api_key")
