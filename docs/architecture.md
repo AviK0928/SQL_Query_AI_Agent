@@ -96,6 +96,19 @@ and — only when a query succeeds — up to 20 result rows.
 Never sent: the database file, the API key is used for auth only, and any row
 the query did not return.
 
+## Observability
+
+Every request gets a `request_id` (uuid4) at HTTP entry, in
+`app/observability/middleware.py`. It is returned in the `X-Request-ID` header
+and, for `/chat`, in the body, and it is carried by every log line and every LLM
+call-log line for that request, so one question can be followed from HTTP entry
+to answer by filtering the logs on it (D55).
+
+Logs are JSON lines on stdout, one object per record
+(`app/observability/logs.py`). They record what happened and how long it took,
+never question text, SQL, rows or exception messages (H5). Tracing and metrics
+are added in the next Phase 9 steps.
+
 ## Deployment
 
 Render free tier, one instance. Build: `pip install -r requirements.txt`.
