@@ -12,6 +12,9 @@ repos:
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
+        # syrupy snapshots are generated and must stay byte-identical to its
+        # output; its format indents blank lines (P19). Other hooks still run.
+        exclude: ^tests/unit/__snapshots__/
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-toml

@@ -39,6 +39,7 @@ dev = [
     "pre-commit==4.6.2",
     "bandit[toml]==1.9.4",        # security lint of app/ (CI)
     "pip-audit==2.10.1",          # known-vulnerability audit of installed deps (CI)
+    "syrupy==6.1.1",              # snapshot tests of rendered prompts (T14)
 ]
 
 [tool.setuptools]

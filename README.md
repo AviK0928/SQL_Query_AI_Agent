@@ -153,7 +153,7 @@ prints its value (S3). Environment variables override `.env`.
 pytest -q
 ```
 
-**414 tests (T10), no API key needed, no network calls.** The language model is
+**547 tests (T14), no API key needed, no network calls.** The language model is
 replaced by a scripted fake. The suite is offline by construction, not by
 convention: a guard in `tests/conftest.py` removes every setting from the
 environment and blocks and records any non-loopback network attempt, failing
@@ -164,6 +164,10 @@ file — runs for real.
 The SQL safety layer is also covered by hypothesis property tests (T6) and a
 manual mutation-testing run with mutmut (T7): `mutmut run "app.sql.validator*"
 "app.sql.executor*"`, configured in `pyproject.toml`.
+
+Rendered prompts are snapshot-tested (T14). After an intended prompt change,
+run `pytest tests/unit/test_prompt_snapshots.py --snapshot-update` and review
+the `.ambr` diff before committing it.
 
 The full quality gate, the same checks CI runs:
 
@@ -300,6 +304,7 @@ recovered and are listed as such rather than invented.
 | D39 | The availability gate stays as written: a Preview model cannot be a primary, even qwen3.8-27b, the strongest generator in its full run (0.898). Relaxing the gate after seeing which model it excludes would be the post-hoc tuning D31 forbids. qwen's promotion to Production is a re-selection trigger (its reports already exist), and it is the candidate for the Phase 7 judge: Preview models are intended for evaluation, and the judge should come from a different family than the generator. |
 | D40 | `sql_generator` = `openai/gpt-oss-120b` (full run on golden_v2 plus adversarial, 3 repeats, 27 Sep 2026): 0.819 (0.729–0.898), all gates computed and passing. It is the only eligible candidate: qwen3.8-27b scored 0.898 but is Preview (D39). Under §3 the two would tie (overlapping correctness intervals) and the tie would go to qwen, so qwen's promotion is a real re-selection trigger. Every role is on gpt-oss-120b, so configuration is unchanged: `GROQ_MODEL` as deployed, `LLM_ROLE_MODELS` empty. |
 | D41 | Phase 7 baseline: run `2026-09-27-full-gpt-oss-120b` (commit `0114cc0`; prompts `sql_gen@5fb4fe06`, `sql_repair@a5c30252`, `answer@3c3a3566`; golden `0866d69057d7`, adversarial `15faddf25c4e`). Total 0.819, execution accuracy 0.899, hard tiers 0.741, refusal and clarity 0.792, consistency 0.848. Prompt changes must beat it with no regression in refusal correctness. The 26 Sep repair and synthesizer runs are the baselines for those roles. |
+| D42 | Prompts are versioned files in `app/prompts/` (`<name>.v<N>.md`, plus `answer_notes.v<N>.toml` for the short result notes), selected by `ACTIVE_VERSIONS`. A released file is never edited: a change is the next version, and a hash manifest test fails on any edit to a released file or any unregistered file. The logged id stays `name@hash8` of the rendered text (D24) rather than becoming the version number, because it also changes when a shared part changes (the schema file, a token) and it kept the Phase 7 baseline ids valid (D41). PROMPTS.md maps each version to its id. Placeholders use `string.Template` (`$schema`), since prompts contain `{}` and `%Y` but never `$`, and rendering fails on a missing or unused value. v1 is byte-identical to the previous `app/prompts.py`; earlier entries citing `app/prompts.py` (D1, D2, D19, D24, D27, L5, S4) now refer to `app/prompts/`. | `app/prompts/`, `tests/unit/test_prompt_versions.py`, PROMPTS.md |
 
 ### Limitations
 
@@ -322,6 +327,7 @@ recovered and are listed as such rather than invented.
 | L16 | The synthesizer suite (8 items) is saturated: every production candidate scores about 1.0 on deterministic checks, so it barely discriminates. The Phase 7 faithfulness judge is the planned addition. |
 | L17 | The Groq models API does not report Production or Preview status. The availability gate computes listing and active status from the dated catalog snapshot; production status is checked by hand on Groq's Models page and recorded (V7). |
 | L18 | gpt-oss-20b, the fallback model, returned empty replies on repair item r08 (2 of 3 repeats), and its largest output used 2,048 tokens. Suspected cause: reasoning exhausts the output budget. Unverified; to be checked before relying on the fallback in Phase 7 or Phase 9. |
+| L19 | Prompt files are read from the source tree next to `app/prompts/__init__.py`. That works with the editable install Render and Colab use (D12), but a non-editable install would omit the `.md` and `.toml` files, because `pyproject.toml` declares no package data. To be fixed with the Phase 10 Docker image. | `app/prompts/loader.py`, `pyproject.toml` |
 
 ### Security
 
@@ -352,6 +358,7 @@ recovered and are listed as such rather than invented.
 | T11 | 6 live tests (`tests/live/test_live_groq.py`, about 8 calls): a gateway round trip with usage and rate-limit headers, a `COUNT` checked against a reference query, two write requests refused with the database unchanged, a clarification, and an empty result disclosed. Collection at `39ceff5`: 513 offline tests, plus 6 live tests deselected (`513/519`). |
 | T12 | `MIN_TESTS` in `ci.yml` was restored from 226 to 508. It had not been raised since Phase 3 (T4 requires raising it deliberately), so CI would not have noticed up to 282 tests disappearing. |
 | T13 | 521 offline tests at `0114cc0`: 513, plus 3 for the gate helpers, 3 end-to-end gate tests through `main()`, and 2 for the runner's `--date` option; plus 6 live tests, deselected by default. `MIN_TESTS` raised to 521 (T4). |
+| T14 | 547 offline tests (521 at T13, 20 for the prompt loader, file versions and baseline id pins, 6 prompt snapshots) plus 6 live tests. Rendered messages for every kind of call are snapshot-tested with syrupy 6.1.1 (`tests/unit/__snapshots__/`); accepting a change needs `pytest tests/unit/test_prompt_snapshots.py --snapshot-update` and a reviewed diff of the `.ambr` file. `MIN_TESTS` raised to 547 (T4). | `tests/unit/test_prompt_*.py`, `.github/workflows/ci.yml` |
 
 ### Data handling
 
@@ -380,6 +387,7 @@ recovered and are listed as such rather than invented.
 | P16 | Three checks fixed in Phase 5: git's rename detection reported `app/agent.py → app/agent/graph.py` as `R066`, so staged-set checks use `--no-renames`; the edit helper now rejects any new Python line over 100 characters before writing; and the baseline runner gained `--tag`, because re-running with an unchanged prompt hash would otherwise find Phase 0's file and skip every item. | Notebook cells P5-2, P5-9, P5-5 |
 | P17 | Colab recovery gaps found on 26 Sep 2026: the recovery cells did not load `LLM_LIMITS`, Cell 7 puts the venv on `PATH`, but a kernel that had not run Cell 7 could not find pre-commit's mypy hook (Cell 0, which every recovery runs first, now sets it too), and Cell 11 hard-coded rate limits dated 24 Sep. Fixed in the notebook in Phase 6. Ad-hoc push cells now use Cell 12's per-command `extraheader`, which never writes the token to `.git/config`. |
 | P18 | Two gates were never computed: `score_candidate` defaulted `available` and `context_ok` to `True`, and the runner never passed them, so every report showed unchecked passes. Found by reading the gate code before a decision. Fixed in `c2faead` (dated catalog snapshot, measured call-log tokens, unverified means fail), with end-to-end tests. Re-rendering all 13 reports changed nothing, so no decision had depended on the default. |
+| P19 | Two Colab gaps found at step 7.1b, 27 Sep 2026. First, `pre-commit run --all-files` checks only tracked files, so the gate passed while the new, untracked snapshot file had trailing whitespace; the hook failed only at commit. Second, syrupy's snapshot format indents blank lines inside multi-line strings, so the trailing-whitespace hook rewrote a generated file. `tests/unit/__snapshots__/` is now excluded from that hook only; the other hooks and CI's gitleaks still scan it. Rules since: every step cell ends with `commit_and_push` (replacing Cell 12), which stages explicit paths, requires the exact staged set, runs pre-commit on exactly those files before committing, pushes with a per-command header and verifies the remote tip. | `.pre-commit-config.yaml`, notebook cells P7-C, P7-9 |
 
 ### Verification
 
