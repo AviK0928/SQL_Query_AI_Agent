@@ -266,3 +266,12 @@ failures, output capped (D64). Trusted criteria only (D46), compared with D48:
   from 29.0k to 44.7k.
 
 The judge run needed the output cap (D64) first. v5 is active by decision (P26).
+
+## Schema hash on every eval call (D54)
+
+Every eval call now records the database schema it ran against, in the call log and
+in the run's `manifest.json` (`schema_hash`). Before D54 only the agent suites did:
+the repair and synthesizer suites and the judge left it empty, 307 of 963 logged
+calls in the committed runs (L22). The hash is never sent to the model, so results
+stay comparable. It is part of the response-cache key, so a run begun before D54
+would re-spend its role-suite and judge calls if resumed.

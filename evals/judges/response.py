@@ -161,15 +161,19 @@ class JudgeResult:
     cached: bool = False  # answered from the response cache: no call, no quota spent
 
 
-def judge_response(llm: _Llm, case: JudgeCase, *, request_id: str | None = None) -> JudgeResult:
+def judge_response(
+    llm: _Llm, case: JudgeCase, *, schema_hash: str, request_id: str | None = None
+) -> JudgeResult:
     """One judge call. Provider errors propagate (the runner stops on them);
-    an invalid reply is returned as a parse failure."""
+    an invalid reply is returned as a parse failure. schema_hash is required, so
+    no judge call can go unrecorded against its schema (D54)."""
     reply = llm.complete(
         LlmRole.JUDGE,
         build_judge_messages(case),
         temperature=0,
         max_tokens=JUDGE_MAX_TOKENS,
         prompt_id=JUDGE_PROMPT_ID,
+        schema_hash=schema_hash,
         request_id=request_id,
     )
     tokens = reply.input_tokens + reply.output_tokens

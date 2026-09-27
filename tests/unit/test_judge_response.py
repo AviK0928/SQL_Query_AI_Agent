@@ -137,12 +137,13 @@ def test_parse_rejects_invalid_verdicts(reply):
 
 def test_judge_calls_the_judge_role_at_temperature_zero():
     llm = FakeLLM(json.dumps(GOOD))
-    result = r.judge_response(llm, _case(), request_id="req-1")
+    result = r.judge_response(llm, _case(), request_id="req-1", schema_hash="207e7a26b02f")
     assert llm.roles == [LlmRole.JUDGE]
     assert llm.kwargs[0] == {
         "temperature": 0,
         "max_tokens": r.JUDGE_MAX_TOKENS,
         "prompt_id": r.JUDGE_PROMPT_ID,
+        "schema_hash": "207e7a26b02f",
         "request_id": "req-1",
     }
     assert result.verdict is not None and result.error is None
@@ -156,7 +157,7 @@ def test_judge_output_cap_fits_the_groq_output_limit():
 
 
 def test_invalid_reply_is_a_recorded_failure_not_an_exception():
-    result = r.judge_response(FakeLLM("I think it is good."), _case())
+    result = r.judge_response(FakeLLM("I think it is good."), _case(), schema_hash="h")
     assert result.verdict is None
     assert result.error == "no JSON object in the reply"
     assert result.raw == "I think it is good."
@@ -164,7 +165,7 @@ def test_invalid_reply_is_a_recorded_failure_not_an_exception():
 
 def test_provider_errors_propagate():
     with pytest.raises(RuntimeError, match="provider down"):
-        r.judge_response(FakeLLM(RuntimeError("provider down")), _case())
+        r.judge_response(FakeLLM(RuntimeError("provider down")), _case(), schema_hash="h")
 
 
 # --- rubric files ------------------------------------------------------------------

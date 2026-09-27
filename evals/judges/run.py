@@ -137,6 +137,7 @@ def judge(
     from app.config import load_settings
     from app.llm.client import LlmError, LlmErrorCode
     from app.llm.registry import LlmRole
+    from app.sql.schema import Database
     from evals.runner import git_commit, sha
 
     base = base_settings or load_settings()
@@ -164,6 +165,7 @@ def judge(
         print("Aborted.")
         return run_dir, 1
 
+    schema_hash = Database.from_settings(base).schema_hash()  # recorded per call (D54)
     manifest = {
         "judge_model": model,
         "rubric": f"{jr.RUBRIC_NAME}.v{jr.RUBRIC_VERSION}",
@@ -172,6 +174,7 @@ def judge(
         "cases": cases_path.name,
         "repeats": list(repeats) if repeats is not None else "all",
         "cases_sha": sha(cases_path),
+        "schema_hash": schema_hash,
         "commit": git_commit(),
         "limits": lim.model_dump(),
         "min_interval_s": min_interval,
@@ -200,7 +203,12 @@ def judge(
         called = False
         record: dict[str, Any] = {"id": case["id"], "repeat": case.get("repeat", 0), "model": model}
         try:
-            res = jr.judge_response(llm, cal.to_judge_case(case), request_id=f"judge-{case['id']}")
+            res = jr.judge_response(
+                llm,
+                cal.to_judge_case(case),
+                request_id=f"judge-{case['id']}",
+                schema_hash=schema_hash,
+            )
             record.update(
                 status="ok",
                 verdict=res.verdict.model_dump() if res.verdict else None,
