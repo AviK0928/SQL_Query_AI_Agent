@@ -7,9 +7,12 @@ rate limit and report writing are proven without spending quota. The live runs
 
 import json
 
+import pytest
+
 from app.llm.client import LlmError, LlmErrorCode
+from app.llm.registry import LlmRole
 from evals import runner
-from tests.fakes import TEST_MODEL, FakeLLM
+from tests.fakes import TEST_MODEL, FakeLLM, FakeResponse
 
 NO_WAIT = {"sleep": lambda s: None, "yes": True, "today": "2026-01-01"}
 
@@ -138,3 +141,90 @@ def test_report_only_rebuilds_without_calls(test_settings, tmp_path):
         == 0
     )
     assert (run_dir / "report.md").exists()
+
+
+class ByRole:
+    """Answers any number of calls: prose for the synthesizer, SQL for the SQL roles."""
+
+    def complete(self, role, messages, **kwargs):
+        if role == LlmRole.SYNTHESIZER:
+            return FakeResponse("There are 20 customers.")
+        return FakeResponse("SELECT COUNT(*) FROM customers")
+
+
+@pytest.mark.parametrize(
+    ("role", "suite", "ids"),
+    [("sql_generator", "golden", ["g01", "g04"]), ("synthesizer", "synthesizer", ["s01", "s02"])],
+    ids=["agent-suites", "role-suites"],
+)
+def test_one_llm_stack_per_repeat_serves_all_its_items(test_settings, tmp_path, role, suite, ids):
+    """One cache per repeat (D36): the stack is built once per repeat, not per item."""
+    built = []
+
+    def make_llm(settings):
+        built.append(settings.llm_cache_path.name)
+        return ByRole()
+
+    run_dir, code = runner.run(
+        role=role,
+        model=TEST_MODEL,
+        suites=[suite],
+        ids=ids,
+        repeats=1,
+        tag="t",
+        base_settings=test_settings,
+        make_llm=make_llm,
+        reports=tmp_path,
+        **NO_WAIT,
+    )
+    assert code == 0 and built == ["repeat0.sqlite"]
+    assert [(r["id"], r["status"]) for r in records(run_dir)] == [(i, "ok") for i in ids]
+
+
+def test_other_provider_errors_are_recorded_and_the_run_goes_on(test_settings, tmp_path):
+    """Only a rate limit stops a run. An errored item is run again on resume."""
+    timeout = LlmError(LlmErrorCode.TIMEOUT, "slow")
+    ids = ["s01", "s02"]
+    script = [timeout, "There are 20 customers."]
+    run_dir, code = run(test_settings, tmp_path, suites=["synthesizer"], ids=ids, script=script)
+    assert code == 0
+    assert [(r["id"], r["status"], r.get("error")) for r in records(run_dir)] == [
+        ("s01", "error", "LLM_TIMEOUT"),
+        ("s02", "ok", None),
+    ]
+    script = ["Total revenue is Rs 1,83,530."]
+    again, code = run(test_settings, tmp_path, suites=["synthesizer"], ids=ids, script=script)
+    assert again == run_dir and code == 0
+    assert [(r["id"], r["status"]) for r in records(run_dir)][-1] == ("s01", "ok")
+
+
+def test_nothing_runs_without_confirmation(test_settings, tmp_path):
+    asked = []
+    run_dir, code = runner.run(
+        role="synthesizer",
+        model=TEST_MODEL,
+        suites=["synthesizer"],
+        ids=["s02"],
+        repeats=1,
+        tag="t",
+        base_settings=test_settings,
+        make_llm=lambda s: FakeLLM(),
+        reports=tmp_path,
+        today="2026-01-01",
+        sleep=lambda s: None,
+        confirm=lambda text: asked.append(text) or "n",
+    )
+    assert code == 1 and asked == ["Proceed? [y/N] "]
+    assert not (run_dir / "manifest.json").exists()
+    assert not (run_dir / "results.jsonl").exists()
+
+
+def test_rescore_writes_a_d52_copy_without_calls(test_settings, tmp_path, capsys):
+    script = ["There are 20 customers."]
+    run_dir, _ = run(test_settings, tmp_path, suites=["synthesizer"], ids=["s02"], script=script)
+    capsys.readouterr()
+    assert runner.main(["--rescore", str(run_dir)]) == 0
+    copy = tmp_path / f"{run_dir.name}-d52"
+    assert records(copy) == records(run_dir), "no clarify item, so nothing changes"
+    assert json.loads((copy / "manifest.json").read_text())["rescored_from"] == run_dir.name
+    assert "# Eval report: synthesizer" in capsys.readouterr().out

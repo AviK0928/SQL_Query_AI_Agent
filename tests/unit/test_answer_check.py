@@ -106,3 +106,17 @@ def test_numbers_inside_words_are_ignored():
 
 def test_normalize_collapses_unicode_space_and_case():
     assert normalize("Showing\u00a0THE\u202f first") == "showing the first"
+
+
+# --- NULL cells ------------------------------------------------------------------
+
+
+def test_null_cells_are_skipped_when_tracing_numbers():
+    """A NULL cell is neither a number nor text: it supports nothing and breaks nothing."""
+    result = check_answer("Aarav Sharma spent Rs 500.", [["Aarav Sharma", None, 500]])
+    assert result.findings == ()
+
+
+def test_a_number_backed_only_by_a_null_is_unsupported():
+    result = check_answer("The average is 42.", [[None]])
+    assert result.findings == (UNSUPPORTED_NUMBERS,)

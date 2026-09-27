@@ -4,11 +4,12 @@ import json
 
 import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 import app.main as main
 from app.config import ConfigError
 from app.main import SessionStore, create_app
-from tests.fakes import TEST_LLM_LIMITS, TEST_MODEL
+from tests.fakes import TEST_LLM_LIMITS, TEST_MODEL, FakeLLM
 
 
 @pytest.fixture
@@ -53,3 +54,24 @@ def test_session_store_evicts_oldest_session():
     assert len(store) == 2
     assert store.get("a") == []
     assert store.get("c") != []
+
+
+def test_without_a_frontend_the_root_describes_the_api(test_settings, monkeypatch, tmp_path):
+    """A deployment without frontend/ still starts: / explains the API, /static is not mounted."""
+    missing = tmp_path / "no-frontend"
+    monkeypatch.setattr(main, "FRONTEND_DIR", missing)
+    monkeypatch.setattr(main, "INDEX_FILE", missing / "index.html")
+    client = TestClient(create_app(test_settings, llm=FakeLLM()))
+    root = client.get("/")
+    assert root.status_code == 200
+    assert root.json()["endpoints"] == ["/health", "/schema", "/chat", "/docs"]
+    assert client.get("/static/app.js").status_code == 404
+
+
+def test_a_frontend_without_index_still_serves_its_files(test_settings, monkeypatch, tmp_path):
+    (tmp_path / "app.js").write_text("// built asset\n")
+    monkeypatch.setattr(main, "FRONTEND_DIR", tmp_path)
+    monkeypatch.setattr(main, "INDEX_FILE", tmp_path / "index.html")
+    client = TestClient(create_app(test_settings, llm=FakeLLM()))
+    assert "API is running" in client.get("/").json()["message"]
+    assert client.get("/static/app.js").text == "// built asset\n"

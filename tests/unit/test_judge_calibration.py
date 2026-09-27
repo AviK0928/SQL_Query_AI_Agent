@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.llm.client import LlmError, LlmErrorCode
+from app.llm.registry import LlmRole
 from evals.judges import calibration as cal
 from evals.judges import run as jrun
 from evals.judges.response import CRITERIA, Verdict
@@ -290,3 +291,99 @@ def test_agree_reports_per_criterion(test_settings, tmp_path):
         "trusted": False,
     }
     assert "| relevance | 50% | 50% | no |" in (run_dir / "agreement.md").read_text()
+
+
+def test_judge_run_waits_for_confirmation(test_settings, tmp_path):
+    cases = _write_cases(tmp_path, ["g01"])
+    asked = []
+    run_dir, code = jrun.judge(
+        model=TEST_MODEL,
+        tag="calib",
+        cases_path=cases,
+        base_settings=test_settings,
+        make_llm=lambda s: FakeLLM(),
+        reports=tmp_path,
+        today="2026-01-01",
+        confirm=lambda text: asked.append(text) or "n",
+    )
+    assert code == 1 and asked == ["Proceed? [y/N] "]
+    assert not (run_dir / "manifest.json").exists()
+    assert not (run_dir / "judgments.jsonl").exists()
+
+
+def test_other_provider_errors_are_recorded_and_the_run_goes_on(test_settings, tmp_path):
+    """Only a rate limit stops a run; any other failure is one errored case."""
+    cases = _write_cases(tmp_path, ["g01", "g02"])
+    timeout = LlmError(LlmErrorCode.TIMEOUT, "slow")
+    run_dir, code = _judge(test_settings, tmp_path, cases, timeout, GOOD)
+    rows = cal.load_jsonl(run_dir / "judgments.jsonl")
+    assert code == 0
+    assert [(r["id"], r["status"], r.get("error")) for r in rows] == [
+        ("g01", "error", "LLM_TIMEOUT"),
+        ("g02", "ok", None),
+    ]
+
+
+def test_judge_builds_the_production_stack_with_only_the_judge_changed(
+    test_settings, tmp_path, monkeypatch
+):
+    """One variable: the judge role gets the model under test, with no fallback,
+    and the cache and call log live in the run folder."""
+    built = []
+
+    def fake_build_llm(settings):
+        built.append(settings)
+        return FakeLLM(GOOD)
+
+    monkeypatch.setattr("app.agent.build_llm", fake_build_llm)
+    cases = _write_cases(tmp_path, ["g01"])
+    run_dir, code = jrun.judge(
+        model=TEST_MODEL,
+        tag="calib",
+        cases_path=cases,
+        yes=True,
+        base_settings=test_settings,
+        reports=tmp_path,
+        today="2026-01-01",
+        sleep=lambda s: None,
+    )
+    (settings,) = built
+    assert code == 0
+    assert settings.llm_role_models[LlmRole.JUDGE] == TEST_MODEL
+    assert settings.groq_fallback_model is None
+    assert settings.llm_cache_path == run_dir / "cache" / "judge.sqlite"
+    assert settings.llm_log_path == run_dir / "calls.jsonl"
+
+
+def test_agree_skips_errored_judgments_and_lists_them_as_missing(tmp_path):
+    cases = _write_cases(tmp_path, ["g01", "g02"])
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    judgments = [
+        {"id": "g01", "repeat": 0, "status": "ok", "verdict": json.loads(GOOD)},
+        {"id": "g02", "repeat": 0, "status": "error", "error": "LLM_TIMEOUT"},
+    ]
+    (run_dir / "judgments.jsonl").write_text("".join(json.dumps(j) + "\n" for j in judgments))
+    sheet = tmp_path / "labels.csv"
+    cal.write_label_sheet(cal.load_jsonl(cases), sheet)
+    _fill(sheet, {i: dict.fromkeys(CRITERIA, "4") for i in ("g01", "g02")})
+    result = jrun.agree(run_dir, sheet, cases_path=cases)
+    assert result["missing"] == ["g02"] and result["parse_failures"] == 0
+    assert result["criteria"]["clarity"]["within_one"] == 0.5
+
+
+def test_sheet_missing_a_criterion_column_is_refused(tmp_path):
+    sheet = tmp_path / "labels.csv"
+    sheet.write_text("id,faithfulness\ng01,5\n", encoding="utf-8")
+    with pytest.raises(cal.LabelError, match=r"missing columns: .*relevance"):
+        cal.read_labels(sheet, ["g01"])
+
+
+def test_sheet_rows_without_an_id_are_ignored(tmp_path):
+    """Blank rows a spreadsheet leaves at the end are not labels."""
+    sheet = tmp_path / "labels.csv"
+    cal.write_label_sheet([_case("g01")], sheet)
+    _fill(sheet, {"g01": dict.fromkeys(CRITERIA, "4")})
+    with sheet.open("a", newline="", encoding="utf-8") as fh:
+        csv.writer(fh).writerow([" "] + [""] * (len(cal.SHEET_COLUMNS) - 1))
+    assert cal.read_labels(sheet, ["g01"]) == {"g01": dict.fromkeys(CRITERIA, 4)}

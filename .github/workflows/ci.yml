@@ -25,7 +25,7 @@ concurrency:
 env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONDONTWRITEBYTECODE: "1"
-  MIN_TESTS: "645"  # raise deliberately when tests are added; CI fails if the count drops (T4)
+  MIN_TESTS: "695"  # raise deliberately when tests are added; CI fails if the count drops (T4)
 
 jobs:
   lint:
@@ -73,6 +73,18 @@ jobs:
           test "${count}" -ge "${MIN_TESTS}"
       - name: pytest
         run: pytest -q --cov --cov-report=term
+      - name: Coverage floors
+        # Line + branch coverage per scope, read from the data pytest just wrote.
+        # coverage.py has a single fail_under, so each scope is its own report.
+        # Floors only go up (T22).
+        run: |
+          for floor in "app/sql/*=100" "app/llm/*=100" "app/agent/*=100" "app/*=99" "evals/*=90"; do
+            scope="${floor%=*}"
+            min="${floor##*=}"
+            out=$(coverage report --include="${scope}" --format=total --fail-under="${min}") && rc=0 || rc=$?
+            echo "${scope}: ${out} (floor ${min})" | tee -a "$GITHUB_STEP_SUMMARY"
+            test "${rc}" -eq 0
+          done
 
   security:
     name: Security scans
