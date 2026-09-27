@@ -210,3 +210,12 @@ answers (g07/r0, g16/r0, g17/r0, g25/r0, g35/r0, g07/r1, g13/r1, g16/r1, g17/r1,
 
 Every prompt experiment reports these same figures, judged the same way, next to
 the D41 scores.
+
+## Clarify or state the assumption (D52)
+
+The `clarify` grader followed only half of the T8 spec. It now also accepts an
+answer that names its basis ("based on total spend"); a silent guess still
+fails. D41 re-scored with no model call (`evals/reports/2026-09-27-full-gpt-oss-120b-d52/`): g22 passes in repeats 0 and
+2 (it said "based on total spend"), repeat 1 still fails (no basis), and g24's
+multi-measure answers still fail. Total 0.819 -> 0.832; refusal and clarity
+0.792 -> 0.875. Phase 7 experiments compare against these figures.

@@ -17,9 +17,13 @@ from app.prompts.loader import PROMPT_DIR
 RELEASED = {
     "schema.v1.md": "5d12418fc0fb125e",
     "sql_gen.v1.md": "202fee36aef990b9",
+    "sql_gen.v2.md": "ed935453b4ba4933",
+    "sql_gen.v3.md": "2416cc5af042d9ed",
+    "sql_gen.v4.md": "5d75ac4e0addb06e",
     "sql_repair.v1.md": "d379da6f79a9da91",
     "sql_repair.v2.md": "44f9fc7a337d3470",
     "answer.v1.md": "d519351408d8139e",
+    "answer.v2.md": "59f88dbf4532058a",
     "answer_notes.v1.toml": "004ae34058b803ad",
 }
 

@@ -45,6 +45,7 @@ SUITES = {
     "adversarial": "adversarial_v1.jsonl",
     "repair": "repair_v1.jsonl",
     "synthesizer": "synthesizer_v1.jsonl",
+    "synthesizer_v2": "synthesizer_v2.jsonl",  # v1 plus L13/L21 shapes (experiment 2)
 }
 ROLE_SUITES = {
     "sql_generator": ("golden", "adversarial"),
@@ -57,10 +58,17 @@ ROLE_SUITES = {
 OVERRIDABLE = {
     "repair": {"sql_repair"},
     "synthesizer": {"answer"},
+    "synthesizer_v2": {"answer"},
     "golden": {"sql_gen", "sql_repair", "answer"},
     "adversarial": {"sql_gen", "sql_repair", "answer"},
 }
-EST_CALLS = {"golden": 2.2, "adversarial": 1.0, "repair": 1.0, "synthesizer": 1.0}
+EST_CALLS = {
+    "golden": 2.2,
+    "adversarial": 1.0,
+    "repair": 1.0,
+    "synthesizer": 1.0,
+    "synthesizer_v2": 1.0,
+}
 EST_TOKENS_PER_CALL = 700
 
 
@@ -623,6 +631,36 @@ def write_report(run_dir: Path) -> str:
     return text
 
 
+def rescore_clarify(src: Path, reports: Path = REPORTS) -> Path:
+    """Re-grade a finished run's clarify items under D52, without any model call.
+
+    The stored behaviour_ok already records whether the model asked; an item that
+    answered instead now passes if the answer states its basis. Writes
+    <run>-d52/ (manifest noting the source, results, report); the source is untouched.
+    """
+    dst = reports / f"{src.name}-d52"
+    dst.mkdir(parents=True, exist_ok=True)
+    manifest = json.loads((src / "manifest.json").read_text())
+    manifest.update(rescored_from=src.name, rescore_rule="D52: clarify or state the assumption")
+    (dst / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
+    changed = 0
+    with (dst / "results.jsonl").open("w", encoding="utf-8") as fh:
+        for line in (src / "results.jsonl").read_text().splitlines():
+            rec = json.loads(line)
+            if rec.get("kind") == "clarify" and rec.get("status") == "ok":
+                new = bool(rec.get("behaviour_ok")) or (
+                    bool(rec.get("sql"))
+                    and not rec.get("error")
+                    and g.states_assumption(rec.get("answer") or "")
+                )
+                changed += new != bool(rec.get("behaviour_ok"))
+                rec["behaviour_ok"] = new
+            fh.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+    write_report(dst)
+    print(f"{changed} clarify record(s) changed -> {dst}")
+    return dst
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -643,11 +681,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     p.add_argument("--report-only", metavar="RUN_DIR", help="rebuild report.md; no API calls")
     p.add_argument(
+        "--rescore", metavar="RUN_DIR", help="re-grade clarify items (D52); no API calls"
+    )
+    p.add_argument(
         "--date", help="run-folder date YYYY-MM-DD; resumes a run begun on an earlier UTC day"
     )
     args = p.parse_args(argv)
     if args.report_only:
         print(write_report(Path(args.report_only)))
+        return 0
+    if args.rescore:
+        src = Path(args.rescore)
+        print((rescore_clarify(src, src.parent) / "report.md").read_text())
         return 0
     # Required for a real run only; --report-only rebuilds an existing run's report.
     missing = [f"--{name}" for name in ("role", "model", "tag") if not getattr(args, name)]

@@ -49,9 +49,11 @@ Rules (D42):
 | Prompt | Version | Id | Status | Evidence |
 |---|---|---|---|---|
 | `sql_gen` | v1 (with `schema.v1`) | `sql_gen@5fb4fe06` | Active; Phase 7 baseline | D41 |
+| `sql_gen` | v2, v3, v4 (with `schema.v1`) | `sql_gen@d5145f66`, `sql_gen@485384f7`, `sql_gen@8c7d4fa8` | Candidates: experiments 3, 4, 6; not active | Pre-registered (D53) |
 | `sql_repair` | v1 (with `schema.v1`) | `sql_repair@a5c30252` | Replaced by v2 (D50) | D41; repair run 26 Sep 2026 |
 | `sql_repair` | v2 (with `schema.v1`) | `sql_repair@cbe7c9f7` | Active since experiment 1 | D50; `2026-09-27-exp1-repair-v2` |
 | `answer` | v1 (with `answer_notes.v1`) | `answer@3c3a3566` | Active; Phase 7 baseline | D41; synthesizer run 26 Sep 2026 |
+| `answer` | v2 (with `answer_notes.v1`) | `answer@4b837d88` | Candidate: experiment 2; not active | Pre-registered (D53) |
 
 v1 is the text in use since Phase 5, moved into files byte for byte: the ids
 did not change.
@@ -185,6 +187,25 @@ before any change:
   move stayed byte-identical.
 
 ---
+
+## 8. Pre-registered experiments (D53, 27 Sep 2026)
+
+Fixed before any run. Every run: `openai/gpt-oss-120b`, temperature 0, 3 repeats,
+the candidate measured against v1 on the same items in the same way, using
+`--prompt NAME=VERSION` (D49, D51). Judge scores (trusted criteria, D46) on repeat
+0; `false_disclosure` (D47) on every repeat; the clarify rule is D52.
+
+| Exp | Candidate | Hypothesis | Items: targets / controls | Keep only if | Tokens |
+|---|---|---|---|---|---|
+| 2 | `answer.v2` | The answer model reports its own 20-row view as the user's, and warns on intended top-N (L13, L21) | `synthesizer_v2` (s01-s12), v1 and v2 both run | false partial-result warnings fall; s03, s04, s05 still disclose; faithfulness does not drop | ~22k |
+| 3 | `sql_gen.v2` | Rule 5's half-scope causes over-exclusion (A-20); a `cancelled_orders` column lets answers disclose the choice (D45) | g14 / g03, g07, g13, g17, g36, g40 (cancelled orders matter), g06, g12, g15, g19 | g14 passes >= 2/3; no control that passed 3/3 fails; answers mention cancelled orders on >= 2/3 repeats for most targets where they matter (reported either way) | ~36k |
+| 4 | `sql_gen.v3` | Rule 3's `LIMIT 100` cuts lists below the code-owned cap (L5) | g34, g07, g35 / g01, g02, g10, g16, g17, g32, g33 | the `limit_reached` cut on g34 disappears; no correctness loss; false warnings do not rise | ~33k |
+| 6 | `sql_gen.v4` | `LIMIT` at a ranking cut-off drops ties (P2, g18) | g18 / g10, g16, g17, g25, g26 | g18 passes >= 2/3; no control regresses | ~20k |
+
+Experiment 5 (L12) is not a prompt experiment: resolved in the grader (D52).
+Kept generator changes are combined into one `sql_gen` version and checked by a
+full golden and adversarial run against D41 (re-scored, D52) and D48 before the
+Phase 7 pull request.
 
 ## Change log
 

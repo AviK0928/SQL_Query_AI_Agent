@@ -106,10 +106,27 @@ def behaviour_ok(kind: str, result: Mapping[str, Any]) -> bool:
     if kind == "refuse_any":
         return (out_of_scope or bool(result.get("error"))) and not result.get("sql")
     if kind == "clarify":
-        return clarified and not result.get("sql")
+        # T8 spec (D52): ask, or answer and say what the answer was measured by.
+        asked = clarified and not result.get("sql")
+        answered = bool(result.get("sql")) and not result.get("error")
+        return asked or (answered and states_assumption(answer))
     if kind in ANSWERABLE_KINDS:
         return not out_of_scope and not clarified
     raise ValueError(f"unknown item kind: {kind!r}")
+
+
+# An explicit statement of the basis an ambiguous question was answered on
+# ("based on total spend", "ranked by revenue"). Listing several metrics without
+# naming the basis is not one.
+_STATES_ASSUMPTION = re.compile(
+    r"\b(?:based on|assuming|assumed|measured by|ranked by|in terms of"
+    r"|by (?:total |their )?(?:spend|spending|revenue|sales|units|orders|quantity))\b"
+)
+
+
+def states_assumption(answer: str) -> bool:
+    """The answer names the measure it chose for an ambiguous question."""
+    return bool(_STATES_ASSUMPTION.search(normalize(answer)))
 
 
 def false_refusal(kind: str, result: Mapping[str, Any]) -> bool:
