@@ -111,7 +111,9 @@ never question text, SQL, rows or exception messages (H5).
 What the app asks the LLM and what it gets back is in the LLM call log
 (`app/llm/calllog.py`): one line per call with the same `request_id`, and with
 `LLM_LOG_CONTENT=true` the messages and the reply, each clipped to
-`LLM_LOG_MAX_CHARS` (D56). There is no separate tracing or metrics system.
+`LLM_LOG_MAX_CHARS` (D56). `python -m app.observability.view` prints one
+request's calls in order (README, "Seeing what the app asks the LLM"). There is
+no separate tracing or metrics system.
 
 ## Deployment
 

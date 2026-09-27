@@ -204,6 +204,26 @@ Click **Show generated SQL** under any answer to see the query. Anything
 unrelated to the database — coding questions, general knowledge, requests to
 modify data — gets a polite refusal.
 
+## Seeing what the app asks the LLM
+
+Every LLM call is one JSON line in the call log (`app/llm/calllog.py`), tagged
+with the request id that `/chat` returns in its `X-Request-ID` header. With
+`LLM_LOG_CONTENT=true` the line also holds the messages sent and the reply
+received (clipped to `LLM_LOG_MAX_CHARS`, D56). The viewer prints one request's
+calls in order: role, model, prompt id, tokens, latency and outcome, then what
+was sent (`-->`) and what came back (`<--`):
+
+```bash
+python -m app.observability.view /content/uvicorn.log                 # last 5 requests
+python -m app.observability.view calls.jsonl --request-id <X-Request-ID>
+python -m app.observability.view render_logs.txt --last 1 --full       # include system prompts
+```
+
+It reads a `LLM_LOG_PATH` file, the uvicorn log from notebook Cell 10, or log
+text copied from Render's log page saved to a file; lines that are not call-log
+records are skipped. System prompts are folded to one line (their prompt id
+names the versioned file) unless `--full` is given.
+
 ## API
 
 | Method | Path | Returns |
@@ -410,6 +430,7 @@ recovered and are listed as such rather than invented.
 | T26 | 713 offline tests (706 at T25, plus 7 from the Phase 8 review of every test layer in Section 7). Integration, new: the agent over the real gateway and client with only the transport scripted (`tests/test_llm_stack.py`): a 429 with retry-after waited out exactly, a retired model falling back with the call log saying so, rate limits on every model becoming a coded answer with no query run, a persistent timeout coded without a fallback, and a repeated question answered from the cache with no quota spent. Agent, new: unparseable SQL and an invalid LIMIT repaired without reaching the database, the two repairable codes no agent test covered (D20). Already complete: every unit area Section 7 lists, API tests on every endpoint (`/health`, `/schema`, `/chat`, `/`), rendered-prompt snapshots (T14). Deferred to Phase 10, which defines it: one error schema for API responses and its contract tests. Phase 8 count by `pytest --collect-only`: 713 offline + 6 live. `MIN_TESTS` raised to 713 (T4). | `tests/test_llm_stack.py`, `tests/test_agent.py` |
 | T27 | 733 offline tests (713 at T26, plus 20). Logging unit tests (11): one JSON object per line with the core fields, the request id from the context or given explicitly, extra fields that cannot overwrite core ones, an exception's type and stack but never its message, secret redaction in nested fields, writing to the current stdout, a malformed record reported instead of raised, idempotent configuration, and H2. Request-id tests (9): a fresh uuid per response, a forged header ignored, header, body and every LLM call sharing one id, the access record (without question or query string), no record for `/health`, the id inside a sync route's worker thread, a route crash recorded as 500, a `/chat` crash logged by type with the id returned, and `Agent.ask` using a given id. `MIN_TESTS` raised to 733 (T4). | `tests/unit/test_observability_logs.py`, `tests/test_request_id.py` |
 | T28 | 738 offline tests (733 at T27, plus 5): long messages and replies clipped with a marker while `llm.input_chars` keeps the true size, text exactly at the cap kept whole, a secret cut by the cap still fully redacted, the call-log default equal to the settings default, and `LLM_LOG_MAX_CHARS=0` refused. Two existing tests became stricter: the settings defaults and the logger built from settings now also check the cap. `MIN_TESTS` raised to 738 (T4). | `tests/unit/test_llm_calllog.py`, `tests/test_config.py` |
+| T29 | 752 offline tests (738 at T28, plus 14). Viewer (13): only `llm.call` records kept, with platform prefixes and other lines skipped; grouping by request in first-seen order; a call with content (system prompt folded, messages, multi-line reply), `--full`, cache-hit and fallback labels, the hint when content was not logged, a failed call with its code and detail, `--request-id`, `--last` from a file, from stdin and from the process stdin, an unknown id and an empty selection reported. Phase 9 definition of done (1): one `POST /chat` over the production app, agent, gateway, call log and client with only the transport scripted; the `X-Request-ID` header finds the access record, both LLM calls in order with the question sent, the SQL returned, the rows sent and the answer returned, and the viewer prints that conversation in order. `MIN_TESTS` raised to 752 (T4). | `tests/unit/test_observability_view.py`, `tests/test_llm_io_trace.py` |
 | T31 | 644 offline tests (642 at T21, plus 2: the `sql_gen.v5.md` release pin, and a test that v5 is v1 plus exactly v2's rule 5 and v4's rule 7, with rule 3 kept). Numbered after the highest T in the stack (T30). `MIN_TESTS` raised to 644 (T4). | `tests/unit/test_phase7_candidates.py`, `tests/unit/test_prompt_versions.py` |
 | T32 | 645 offline tests (644 at T31, plus 1: the judge output cap stays under Groq's 1,000 output-tokens-per-minute limit and at least twice the largest measured verdict). The judge-call test now also expects `max_tokens` (D64). `MIN_TESTS` raised to 645 (T4). | `tests/unit/test_judge_response.py`, `.github/workflows/ci.yml` |
 | T33 | 716 offline tests after rebasing Phase 8 onto `main` at `0d8b8f4`: 713 at T26 plus the 3 tests Phase 7 added after `88ba920` (T31, T32). The counts in T22-T26 are as recorded on the branch before the rebase. `MIN_TESTS` is 716 (T4). | `.github/workflows/ci.yml` |
