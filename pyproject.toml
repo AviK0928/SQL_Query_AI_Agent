@@ -71,8 +71,9 @@ skip_covered = true
 precision = 1
 # Only runs as a script; the main() it calls is tested.
 exclude_also = ['if __name__ == "__main__":']
-# No fail_under here: coverage.py has one global floor, and the floors are per
-# package. ci.yml checks each scope against the data pytest writes (T22).
+# Every scope of app/ and evals/ is held at 100% line + branch (T23), so one
+# global floor is enough: `pytest --cov` fails below it, in CI and in Cell 9.
+fail_under = 100
 
 # --- bandit --------------------------------------------------------------
 [tool.bandit]

@@ -72,19 +72,8 @@ jobs:
           echo "Collected ${count} tests (minimum ${MIN_TESTS})" | tee -a "$GITHUB_STEP_SUMMARY"
           test "${count}" -ge "${MIN_TESTS}"
       - name: pytest
+        # Fails below 100% line + branch coverage of app/ and evals/ (fail_under, T23).
         run: pytest -q --cov --cov-report=term
-      - name: Coverage floors
-        # Line + branch coverage per scope, read from the data pytest just wrote.
-        # coverage.py has a single fail_under, so each scope is its own report.
-        # Floors only go up (T22).
-        run: |
-          for floor in "app/sql/*=100" "app/llm/*=100" "app/agent/*=100" "app/*=99" "evals/*=90"; do
-            scope="${floor%=*}"
-            min="${floor##*=}"
-            out=$(coverage report --include="${scope}" --format=total --fail-under="${min}") && rc=0 || rc=$?
-            echo "${scope}: ${out} (floor ${min})" | tee -a "$GITHUB_STEP_SUMMARY"
-            test "${rc}" -eq 0
-          done
 
   security:
     name: Security scans

@@ -175,10 +175,9 @@ The full quality gate, the same checks CI runs:
 ruff check . && ruff format --check . && mypy app && pytest -q --cov
 ```
 
-CI also holds each scope to a line + branch coverage floor (T22): `app/sql`,
-`app/llm` and `app/agent` at 100%, all of `app` at 99%, `evals` at 90%. After
-`pytest --cov`, check one by hand with
-`coverage report --include="app/sql/*" --fail-under=100`.
+`pytest --cov` fails below 100% line + branch coverage of `app` and `evals`
+(`fail_under = 100` in `pyproject.toml`, T23), in CI and in notebook Cell 9.
+New code arrives with its tests.
 
 Git hooks run ruff, gitleaks, mypy and basic file checks on every commit
 (P8). Install them once per clone with `pre-commit install`.
@@ -394,6 +393,7 @@ recovered and are listed as such rather than invented.
 | T20 | 626 offline tests (621 at T19, plus 4 for agent overrides: only the named prompt and id change and every other message is byte-identical, the default sends the active prompts, a bad name or version fails at construction; plus 1 for the role suites refusing prompts they never send). One expectation changed on purpose: agent suites now accept and record overrides instead of refusing them (D51). `MIN_TESTS` raised to 626 (T4). | `tests/unit/test_agent_prompt_versions.py`, `tests/unit/test_prompt_variants.py` |
 | T21 | 642 offline tests (626 at T20, plus 12 for the Phase 7 candidates: each changes only its declared lines, `synthesizer_v2` extends v1 unchanged, the new items' shapes, the D52 rule on real baseline answers, and the D41 re-score flipping exactly g22 r0 and r2; plus 4 immutability cases for the new prompt files). `MIN_TESTS` raised to 642 (T4). | `tests/unit/test_phase7_candidates.py` |
 | T22 | 692 offline tests (642 at T21, plus 50 closing every gap in the Phase 8 coverage report at `88ba920`). Grading is now tested on every item kind the live runs grade: adversarial leak checks, empty and truncation items, clarifying turns replayed as history, required synthesizer disclosures, and resume after a non-429 error. Judge runs: confirmation, non-429 errors, the default LLM stack with only the judge role changed, CLI routing, rubric-file validation, and label sheets with missing columns or blank rows. The committed calibration set and the D48 case file are rebuilt exactly from their runs through the production safety layer. App: cache hits counted apart from calls, NULL cells in `check_answer`, the API without a frontend. Coverage (line + branch) now also measures `evals/` and is enforced per scope in CI, floors only going up: `app/sql`, `app/llm`, `app/agent` 100%, `app` 99%, `evals` 90%. Measured at this commit: `app` 100.0%, `evals` 100.0% (99.6% and 88.5% in the report at `88ba920`). Not measured: `if __name__ == "__main__":` lines, and `evals/baseline/` (the Phase 0 live harness, T10). `MIN_TESTS` raised to 692 (T4). | `pyproject.toml`, `.github/workflows/ci.yml`, `tests/unit/test_eval_grading.py`, `tests/unit/test_judge_cli.py` |
+| T23 | Coverage floor raised to 100% line + branch for all of `app` and `evals`, agreed 27 Sep 2026 after T22 measured 100% in every scope (T22's floors were `app/sql`, `app/llm`, `app/agent` 100, `app` 99, `evals` 90). With every scope at 100 the per-scope CI loop added nothing, so it was replaced by one `fail_under = 100` in `pyproject.toml`: `pytest --cov` itself fails, in CI and in notebook Cell 9 (`commit_and_push` runs pytest without coverage, so CI and Cell 9 are the gates). Test count unchanged at 692. | `pyproject.toml`, `.github/workflows/ci.yml` |
 | T31 | 644 offline tests (642 at T21, plus 2: the `sql_gen.v5.md` release pin, and a test that v5 is v1 plus exactly v2's rule 5 and v4's rule 7, with rule 3 kept). Numbered after the highest T in the stack (T30). `MIN_TESTS` raised to 644 (T4). | `tests/unit/test_phase7_candidates.py`, `tests/unit/test_prompt_versions.py` |
 | T32 | 645 offline tests (644 at T31, plus 1: the judge output cap stays under Groq's 1,000 output-tokens-per-minute limit and at least twice the largest measured verdict). The judge-call test now also expects `max_tokens` (D64). `MIN_TESTS` raised to 645 (T4). | `tests/unit/test_judge_response.py`, `.github/workflows/ci.yml` |
 
