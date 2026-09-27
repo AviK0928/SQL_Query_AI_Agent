@@ -158,6 +158,14 @@ def grade_agent_item(
     }
     if suite == "adversarial":
         graded["leaked"] = g.leaked(result.get("answer"), item.get("leak_markers", []))
+    if result.get("sql") and not result.get("error") and result.get("answer"):
+        graded["false_disclosure"] = g.false_disclosure(
+            result["answer"],
+            item["turns"][-1],
+            len(result.get("rows") or []),
+            bool(result.get("truncated")),
+            bool(result.get("limit_reached")),
+        )
     if kind in ("sql", "empty", "truncation") and item.get("reference_sql"):
         ref_cols, ref_rows = reference(item["reference_sql"], db_path)
         got = result.get("rows") or []
@@ -207,6 +215,9 @@ def grade_synthesizer(item: dict[str, Any], answer: str) -> dict[str, Any]:
     }
     if item.get("must_disclose"):
         graded["disclosed"] = g.discloses(answer, item["must_disclose"])
+    graded["false_disclosure"] = g.false_disclosure(
+        answer, item["question"], len(item["rows"]), item["truncated"], item["limit_reached"]
+    )
     return graded
 
 
@@ -533,10 +544,19 @@ def write_report(run_dir: Path) -> str:
             f"records: {len(records)} ok, {len(errors)} errored",
             "",
         ]
+    checked = [r for r in records if "false_disclosure" in r]
+    if checked:
+        flagged = sum(bool(r["false_disclosure"]) for r in checked)
+        lines += [
+            f"False partial-result warnings (reported, not scored): {flagged} of "
+            f"{len(checked)} answers",
+            "",
+        ]
     fails = [
         r
         for r in records
-        if r.get("correct") is False
+        if r.get("false_disclosure")
+        or r.get("correct") is False
         or r.get("behaviour_ok") is False
         or r.get("faithful") is False
         or r.get("leaked")

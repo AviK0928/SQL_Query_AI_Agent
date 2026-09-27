@@ -169,6 +169,45 @@ def discloses(answer: str, what: str) -> bool:
     raise ValueError(f"unknown disclosure: {what!r}")
 
 
+# A claim that rows are being withheld. Stricter than _DISCLOSES_PARTIAL, which also
+# accepts plain words such as "only" and "first" and so cannot detect a false claim.
+_CLAIMS_PARTIAL = re.compile(
+    r"only (?:the )?(?:first|initial|top)\s*(?:\d+ )?(?:of the \d+ )?(?:matching )?"
+    r"(?:rows|records|results|entries)"
+    r"|\b(?:first|initial) \d+ (?:of|rows|records|results)\b"
+    r"|\binitial rows\b|\btruncat\w*|\bpartial (?:result|list|view)\w*"
+    r"|\bnot all (?:the )?(?:rows|records|results|matching)"
+    r"|\b(?:more|additional) (?:matching )?\w+ (?:may|might|could) exist"
+)
+_NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+}  # fmt: skip
+
+
+def claims_partial(answer: str) -> bool:
+    """The answer tells the user that rows are being withheld."""
+    return bool(_CLAIMS_PARTIAL.search(normalize(answer)))
+
+
+def false_disclosure(
+    answer: str, question: str, row_count: int, truncated: bool, limit_reached: bool
+) -> bool:
+    """A partial-result warning on a complete result (L13, L21).
+
+    Complete means not truncated and not limit_reached, or an intended top-N: the
+    query's own LIMIT was reached and the question itself asked for that many rows
+    ("the 3 most expensive", "top five"). A reached LIMIT the question did not ask
+    for (LIMIT 1 hiding a tie, LIMIT 100 on "every pair") is genuinely partial, so a
+    warning there is true, not false.
+    """
+    asked = {int(n) for n in numbers_in(question) if float(n).is_integer()}
+    asked |= {v for w, v in _NUMBER_WORDS.items() if re.search(rf"\b{w}\b", normalize(question))}
+    intended_top_n = limit_reached and row_count in asked
+    complete = (not truncated and not limit_reached) or intended_top_n
+    return complete and claims_partial(answer)
+
+
 def has_currency(answer: str) -> bool:
     """Amounts written as Rs (or ₹) followed by a number."""
     return bool(_CURRENCY.search(normalize(answer)))

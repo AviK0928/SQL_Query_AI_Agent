@@ -141,7 +141,7 @@ def judge(
         update={
             "llm_role_models": {**base.llm_role_models, LlmRole.JUDGE: model},
             "groq_fallback_model": None,
-            "llm_cache_path": run_dir / "cache.sqlite",
+            "llm_cache_path": run_dir / "cache" / "judge.sqlite",
             "llm_log_content": True,
             "llm_log_path": run_dir / "calls.jsonl",
         }

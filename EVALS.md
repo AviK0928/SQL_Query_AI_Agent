@@ -180,3 +180,13 @@ re-scoring a revised rubric on these labels are recorded in D46.
 **Found while labelling:** golden reference issues (L20), false partial-result
 warnings on complete results (L21), and the scope of the cancelled-orders rule
 (D45).
+
+## False partial-result warnings (Phase 7, D47)
+
+Honesty is not a trusted judge criterion (D46), so the failures found in
+calibration are graded in code: `false_disclosure` flags an answer that says rows
+are withheld when the result is complete (L13 top-N, L21 complete results). It
+is recorded per answer and shown in every report ("False partial-result warnings:
+k of n") and in the failures table, but not added to the score, so runs stay
+comparable with D41. On the calibration answers it flags g07, g35, g16, g17 and
+g25, and correctly leaves g18, g22 and g34, where rows really were withheld.
