@@ -568,6 +568,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--min-interval", type=float, default=12.0)
     p.add_argument("--yes", action="store_true")
     p.add_argument("--report-only", metavar="RUN_DIR", help="rebuild report.md; no API calls")
+    p.add_argument(
+        "--date", help="run-folder date YYYY-MM-DD; resumes a run begun on an earlier UTC day"
+    )
     args = p.parse_args(argv)
     if args.report_only:
         print(write_report(Path(args.report_only)))
@@ -576,6 +579,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     missing = [f"--{name}" for name in ("role", "model", "tag") if not getattr(args, name)]
     if missing:
         p.error("the following arguments are required: " + ", ".join(missing))
+    if args.date:
+        try:
+            datetime.strptime(args.date, "%Y-%m-%d")
+        except ValueError:
+            p.error("--date must be YYYY-MM-DD")
     suites = args.suites or list(ROLE_SUITES[args.role])
     run_dir, code = run(
         role=args.role,
@@ -586,6 +594,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ids=args.ids,
         yes=args.yes,
         min_interval=args.min_interval,
+        today=args.date,
     )
     print((run_dir / "report.md").read_text() if (run_dir / "report.md").exists() else "")
     return code
