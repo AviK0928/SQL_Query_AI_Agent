@@ -15,9 +15,11 @@ SQL that produced it, and the rows it returned.
 
 | Document | Contents |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | Components, request flow, security layers |
-| [`docs/workflow.md`](docs/workflow.md) | The LangGraph state, nodes, edges and retry |
-| [`PROMPTS.md`](PROMPTS.md) | Every prompt the application sends |
+| [`docs/architecture.md`](docs/architecture.md) | Components, request flow, security layers, models, observability |
+| [`docs/workflow.md`](docs/workflow.md) | The LangGraph state, nodes, edges and the bounded repair loop |
+| [`PROMPTS.md`](PROMPTS.md) | Every prompt the application sends, its versions and experiments |
+| [`MODEL_SELECTION.md`](MODEL_SELECTION.md) | How a model is chosen per role: gates, weights, fixed before any run |
+| [`EVALS.md`](EVALS.md) | Eval datasets, runs, results and the LLM judge |
 | [`DISCOVERIES.md`](DISCOVERIES.md) | Findings, decisions, and what went wrong |
 | [`AUDIT.md`](AUDIT.md) | Phase 0 audit of the pre-refactor code and the live baseline |
 | [`notebooks/dev.ipynb`](notebooks/dev.ipynb) | Colab driver notebook: setup, quality gate, run, live eval, push |
@@ -38,13 +40,17 @@ the thing generating the SQL cannot be trusted.
 
 ## Features
 
-- Natural-language questions to SQL
-- Generated SQL shown in the UI, collapsible
-- Results rendered as a table
+- Natural-language questions to SQL, with the SQL and the rows shown in the UI
 - Follow-up questions using conversation history
-- Out-of-scope questions politely rejected
-- One automatic retry when a query fails
-- Database physically cannot be written to, whatever the model produces
+- Out-of-scope and write requests politely refused; ambiguous questions get a
+  clarifying question or a stated assumption
+- A failed query is repaired automatically, a bounded number of times
+- Honest answers: empty, capped or limited results are always disclosed
+- The database physically cannot be written to, whatever the model produces
+- Models chosen per role on eval evidence; Groq free-tier limits respected, with
+  retries, fallback and a response cache
+- Every LLM call logged with its request id; a viewer prints what the app sent
+  and what came back
 
 ## Screenshots
 
@@ -80,12 +86,14 @@ and guarded by a SQLite authorizer (S2). Full detail in [`docs/architecture.md`]
 | Layer | Choice |
 |---|---|
 | Backend | Python 3.12, FastAPI, Uvicorn |
-| Agent | LangGraph — 5 nodes, 1 conditional edge |
+| Agent | LangGraph — 8 nodes, a bounded repair loop, typed state |
 | LLM | Groq, model set by `GROQ_MODEL` (currently `openai/gpt-oss-120b`, free tier, no card) |
 | Database | SQLite, file committed to the repo |
 | Frontend | HTML, CSS, vanilla JS — no framework, no build |
 | Config | pydantic-settings, validated at startup |
-| Tests | pytest, pytest-cov, httpx; ruff and mypy for lint and types |
+| Tests | pytest (offline), pytest-cov at 100%, hypothesis, syrupy snapshots, mutmut; ruff and mypy |
+| Evals | Custom harness in `evals/`: deterministic graders plus an LLM judge, resumable and throttled |
+| Observability | JSON logs on stdout, a request id per request, the LLM call log and its viewer |
 | Hosting | Render free tier |
 
 Total cost: nothing.
@@ -115,9 +123,32 @@ Open http://localhost:8000
 A free Groq API key takes about a minute at
 [console.groq.com](https://console.groq.com) — email sign-up, no credit card.
 
-**Google Colab:** open `notebooks/dev.ipynb` from GitHub in Colab and run the
-cells in order. The notebook header lists which cells to rerun after a VM
-recycle (P7).
+### Colab quickstart
+
+Development runs in Google Colab (the project's only environment). From nothing
+to a passing test suite and a first live eval:
+
+1. In Colab, **File › Open notebook › GitHub**, repository
+   `AviK0928/SQL_Query_AI_Agent`, branch `main`, file `notebooks/dev.ipynb`.
+2. In the Secrets panel (key icon) add, with notebook access on:
+   `GROQ_API_KEY` (free at console.groq.com), `LLM_LIMITS` (the Groq console
+   limits as one-line JSON, see Configuration), and `GITHUB_PAT` only if you
+   will push.
+3. Run Cells **0, 1, 2, 3, 5, 7, 8**: helpers, Python version check, secrets,
+   persistence folder, clone, project venv and install, git hooks. Cell 6 (git
+   identity) and Cell 12 (`commit_and_push`) are needed only to commit.
+4. Run **Cell 9**, the quality gate CI runs: ruff, ruff format, mypy, and the
+   offline pytest suite at 100% coverage. No API key is used; it ends with
+   `QUALITY GATE PASSED`.
+5. Run **Cell 10** to start the app in the VM and hit `/health`.
+6. Run **Cell 11** with `CONFIRM = False`: the eval runner prints its request
+   and token estimate against the daily quota and makes no call. Set
+   `CONFIRM = True` to run the small subset; the report lands in
+   `evals/reports/<date>-<tag>/report.md`. Long runs use Cells 11b and 11c
+   (a background process with a status cell, D36).
+
+After a VM recycle, rerun Cells 0, 1, 2, 3, 5, 6, 7, 8, 9, 12, as the notebook
+header lists (P7).
 
 ## Configuration
 
@@ -154,7 +185,7 @@ prints its value (S3). Environment variables override `.env`.
 pytest -q
 ```
 
-**770 tests (T35), no API key needed, no network calls.** The language model is
+**770 tests (T30), no API key needed, no network calls.** The language model is
 replaced by a scripted fake. The suite is offline by construction, not by
 convention: a guard in `tests/conftest.py` removes every setting from the
 environment and blocks and records any non-loopback network attempt, failing
@@ -223,6 +254,27 @@ It reads a `LLM_LOG_PATH` file, the uvicorn log from notebook Cell 10, or log
 text copied from Render's log page saved to a file; lines that are not call-log
 records are skipped. System prompts are folded to one line (their prompt id
 names the versioned file) unless `--full` is given.
+
+## Model selection and eval results
+
+Summary as of 27 Sep 2026; the Phase 7 prompt experiments still to run will
+update it (details in [`EVALS.md`](EVALS.md) and
+[`MODEL_SELECTION.md`](MODEL_SELECTION.md)).
+
+| Role | Model | Evidence |
+|---|---|---|
+| `sql_generator` | `openai/gpt-oss-120b` | Full run on golden_v2 plus adversarial, 3 repeats: 0.819 (D40). `qwen/qwen3.8-27b` scored 0.898 but is a Preview model, which the availability gate excludes as a primary (D39) |
+| `sql_repair` | `openai/gpt-oss-120b` | Repair success 0.700 with the v1 repair prompt (D38), 1.000 with v2, which adds the domain rules (D50) |
+| `synthesizer` | `openai/gpt-oss-120b` | 0.997, tied with gpt-oss-20b on correctness; more quota headroom (D37) |
+| `judge` (evals only) | `qwen/qwen3.8-27b` | Calibrated against 26 hand-labelled items: trusted on faithfulness, relevance, completeness and clarity; not on honesty or SQL intent (D46) |
+
+Baseline the prompt work must beat (D41, re-scored under D52): total 0.832,
+execution accuracy 0.899, hard tiers 0.741, refusal and clarity 0.875,
+injection resistance 1.000, consistency 0.848; mean 1,138 tokens per question,
+p95 latency 2.27 s. Judge on the same answers (D48): faithfulness 4.74,
+relevance 5.00, completeness 4.77, clarity 4.91 (out of 5). Model choices
+follow rules fixed before any run (D31); a model deprecation, a new catalog
+model or a Preview model's promotion triggers a re-run.
 
 ## API
 
@@ -361,6 +413,7 @@ recovered and are listed as such rather than invented.
 | D55 | Structured logs and the request id (Phase 9). Every log record is one JSON line on stdout (`ts`, `level`, `logger`, `event`, `request_id`, then extra fields), the stream Render's log viewer shows, in the same format as the LLM call log. The standard library's `logging` is enough, so no logging dependency is added. A middleware creates the request id (uuid4) at HTTP entry, not inside the agent as before, and puts it in the `X-Request-ID` response header, in a context variable read by every log line (including lines from worker threads), and in `/chat`'s body; `/chat` passes it to the agent, which passes it to every LLM call. A client-supplied `X-Request-ID` is ignored, because an outside id could be forged or reused to mix two requests' lines. One access record per request (method, path, status, duration); `/health` probes get none. The unhandled-error branch of `/chat` logs through `logging` instead of `print` and now returns the real request id instead of `null`. `Agent.ask` still creates an id when called without one (evals). Third-party loggers that would write a line per call are held above INFO: `sqlglot` at ERROR (H2), and the HTTP client loggers (`httpx` for the Groq SDK, `httpcore`, `httpx2` for the test client) at WARNING, because they log each request's full URL, query string included; the access-record test found this. | `app/observability/`, `app/main.py`, `app/agent/graph.py` |
 | D56 | Phase 9 reduced to LLM input/output observability (decision, 27 Sep 2026). The goal is to see what the app asks the LLM and what it gets back. The call log (Phase 4) with the request id from HTTP entry (D55) already records one line per call with the role (which step made it), model, prompt id, tokens, latency, retries, cache hit and outcome, and with `LLM_LOG_CONTENT=true` the messages and the reply. Dropped from the plan, with no requirement behind them (principle 1): tracing (OpenTelemetry or Langfuse), a metrics endpoint, and judge-score trends. Moved to Phase 10: `/ready`, with the deploy smoke test that uses it. Phase 9 keeps: content logging in production with a per-message cap `LLM_LOG_MAX_CHARS` (default 4000; the largest message in any committed eval call log is 3,193 characters and the largest reply 1,018, so the cap would never have cut a real call), a viewer that prints one request's calls in order, and an end-to-end test. Secrets are redacted before the cut, so a key split by it cannot leave its prefix in the log. | `app/llm/calllog.py`, `app/config.py` |
 | D57 | Phase 10 reduced to the smoke test and L24 (decision, 27 Sep 2026). `python -m app.smoke URL` checks `/health` without spending quota; with `--question` it also asks one question and checks HTTP 200, no error code, a non-empty answer and a `request_id` equal to the `X-Request-ID` header, so the call log can be read for it. Dropped by decision: a request rate limit and request-size bounds, because the demo is mostly shown to interviewers who ask many questions in a row, and a limit would get in their way (the risk this leaves is L25). Dropped as not needed for a single free instance with a committed database: a unified error schema for every status, `/ready`, a Dockerfile, CORS configuration (with no CORS middleware, browsers already refuse other sites' reads) and the `eval.yml` baseline gate. Each can be added later if a need appears. | `app/smoke.py`, `app/observability/logs.py` |
+| D58 | Phase 11 documentation (27 Sep 2026): `docs/architecture.md` and `docs/workflow.md` rewritten for the refactored code (they still described `app/agent.py`, `app/db.py` and a five-node graph with one fixed retry); README gains a Colab quickstart, a model-selection and eval summary, and current features, tech stack and test count. The summary is dated and says which Phase 7 results are pending, rather than waiting for them. | `README.md`, `docs/` |
 | D59 | Experiment 2 kept: the answer prompt v2 (`answer@4b837d88`) appends two rules to v1: the user sees every returned row, so warn about hidden rows only when a note says the result was truncated or the query's LIMIT was reached; and a question that asked for N rows and got exactly N is complete. On `synthesizer_v2` (gpt-oss-120b, 12 items x 3 repeats, temperature 0, 12 s pacing, v1 and v2 run the same day) false partial-result warnings (D47) fell from 15/36 to 6/36, with the required disclosures (s03, s04, s05: 9/9) and deterministic faithfulness (36/36) unchanged; answer tokens +29%. Decision rule fixed before the run (D53): all three conditions met. s10 (47 rows, 20 shown to the model) still warns on every repeat, so L13 and L21 are mitigated, not resolved. Numbered after the highest D anywhere in the stack (D58, `feat/phase-11-docs`), so rebases cannot duplicate tags. The runner at this commit predates D54: these calls record no schema hash; the schema was `207e7a26b02f`. | `app/prompts/answer.v2.md`, `evals/reports/2026-09-28-exp2-answer-v1/`, `evals/reports/2026-09-28-exp2-answer-v2/` |
 | D60 | Experiment 3 kept: `sql_gen.v2` (`sql_gen@d5145f66`) rewrites rule 5 with the D45 scope (cancelled orders counted when counting or listing orders, excluded from revenue, spend, turnover and units sold) and asks for a `cancelled_orders` column when they change the result. On its pre-registered items (gpt-oss-120b, 3 repeats, temperature 0, 20 s pacing, `sql_repair` and `answer` pinned to v1 so `sql_gen` is the only change from D41 (re-scored, D52), compared on the same items and repeats): g14 0/3 -> 3/3; the 10 controls stayed 3/3. The column's purpose was not shown: answers mentioned cancelled orders on 1 of the 6 targets where they matter (g13), reported either way as pre-registered, and some results gain columns (g17: `email`, `cancelled_orders`). Combined into v5 (D63). Judge on repeat 0 (`qwen/qwen3.8-27b`, trusted criteria, D46, compared with D48 item by item): no item scored below D41 on any criterion; means equal except completeness 4.64 -> 4.73. | `evals/reports/2026-09-28-exp3-sql-gen-v2/`, `evals/reports/2026-09-28-judge-exp3-qwen3.8-27b/` |
 | D61 | Experiment 4 reverted: `sql_gen.v3` (`sql_gen@485384f7`) drops rule 3 (`LIMIT 100`). g34 returned all 190 unordered pairs instead of 100, but the pre-registered rule was not met: g34 3/3 -> 0/3 and false warnings 12 -> 15 over the items. Both come from g34: it is graded on disclosure and a complete result has nothing to disclose, and the three new warnings are g34's answers under the pinned answer v1 ("first 20 of 190"). The evidence points at the item (L20), not the change, but the rule fixed before the run decides. L5 stays open; v3 is to be re-tested as a new pre-registered experiment after golden_v3. Judge on repeat 0 (`qwen/qwen3.8-27b`, trusted criteria, D46, compared with D48 item by item): means faithfulness 4.10 -> 4.30, completeness 4.20 -> 4.50, clarity 4.70 -> 4.90; two scores fell, both on answers written by the pinned answer v1 (g07 faithfulness 2 -> 1 for a false "first 20 of 30" warning, L21; g35 completeness 4 -> 2 for summarising 47 rows). Reported only: the decision stands on the pre-registered rule. | `evals/reports/2026-09-28-exp4-sql-gen-v3/`, `evals/reports/2026-09-28-judge-exp4-qwen3.8-27b/` |
@@ -486,6 +539,7 @@ recovered and are listed as such rather than invented.
 | P22 | Two Phase 8 commit messages ended in attribution trailers that do not belong in this repository's history. The three Phase 8 commits were rewritten on 27 Sep 2026 with `git filter-branch --msg-filter` (messages only: each tree, author, committer and date verified identical) and force-pushed with a lease: `0f25a80` → `5f88671`, `d924d66` → `a473c82`, `f478471` → `2be778e`. Records now name the new hashes. Safe only because the branch had no PR and no other clone; `feat/phase-7-prompts` and `main` were untouched. | `feat/phase-8-tests` |
 | P23 | `commit_and_push` v4 (notebook Cell 12) runs pytest with coverage, so the 100% floor (T23) is checked before every commit. v3 ran pytest without coverage, leaving CI and Cell 9 as the only coverage gates, and CI does not run on this branch until the Phase 7 PR. Coverage data goes to `/content`, outside the repository. | `notebooks/dev.ipynb` |
 | P24 | Phase 9 started before Phase 8 had green CI (decision, 27 Sep 2026). The plan says no phase starts before the previous one is committed with green CI, but CI runs only on PRs and pushes to `main`, and no PR is opened for Phase 7 or 8 until the remaining gpt-oss-120b Phase 7 runs are done and reviewed (L23). `feat/phase-9-observability` is stacked on `feat/phase-8-tests` at `beac515`, so it keeps the 100% coverage gate; every commit passes the local gate (`commit_and_push` v4). Merge order: Phase 7, then Phase 8 rebased onto `main`, then Phase 9. | `feat/phase-9-observability` |
+| P25 | Phases 10 and 11 were also built before any of Phases 8-10 had CI, by the same decision as P24: `feat/phase-10-hardening` is stacked on Phase 9 and `feat/phase-11-docs` on Phase 10, each commit through the local gate. They merge in order after Phase 7: 7, 8, 9, 10, 11, each rebased onto `main` first. | `feat/phase-10-hardening`, `feat/phase-11-docs` |
 | P26 | Phase 7 closed without meeting its DoD in full, by decision (Aviraj, 29 Sep 2026). The final run beat D41 on execution accuracy (0.899 -> 0.970, correctness interval 0.788-0.983 -> 0.900-1.000), but judge scores were flat and refusal and clarity regressed on two ambiguous items with a known cause (L27). v5 was activated anyway: the accuracy gain lies outside the run-to-run noise, and a further experiment would cost another quota day. This overrides the plan's DoD, as P24 overrode the green-CI rule. Numbered after the highest P in the stack (P25). | README D65, L27 |
 | P27 | Phase 7 was squash-merged (#25), so Phase 8 was rebased with `git rebase --onto main 88ba920`. Conflicts were only in the README record tables, `EVALS.md` and `MIN_TESTS`. Table rows were kept from both sides in number order, and a row changed on one side kept that change. Both appended `EVALS.md` sections were kept. The test counts were raised by Phase 7's 3 tests. Code merged without conflicts: the judge call now carries both D54's required `schema_hash` and D64's `max_tokens`. Phases 9-11 are rebased the same way. | `README.md` |
 | P28 | Phase 8 was squash-merged (#26), so Phase 9 was rebased with `git rebase --onto main beac515`. The conflicts were resolved the same way as for Phase 8 (P27): record rows from both sides in number order, test counts raised by the tests on `main`, and both appended doc sections kept. | `README.md` |

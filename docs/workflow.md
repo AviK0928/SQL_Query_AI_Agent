@@ -2,138 +2,131 @@
 
 ## What LangGraph is doing here
 
-LangGraph structures the agent as a small state machine. Instead of one function
-with nested `if` statements, each step is a node, and the connections between
-them are edges.
+The agent is a small state machine: each step is a node, and edges decide which
+node runs next. Nodes do not modify the state; they return the fields they
+changed and LangGraph merges them in.
 
-For a flow this small a plain function would also work. The graph earns its
-place for one reason: the retry limit becomes a property of the wiring rather
-than a counter someone could later change by mistake.
+A plain function could run this flow. The graph earns its place because the
+repair loop is bounded by its wiring and the state's counter, not by a check
+someone could later remove, and because every node can be tested on its own.
 
 | Term | Meaning here |
 |---|---|
-| State | A dictionary carrying the question, SQL, rows and errors between steps |
-| Node | A function that reads the state and returns the fields it changed |
+| State | A typed dictionary (`app/agent/state.py`) carrying the question, SQL, rows, error code and answer between steps |
+| Node | A method of `Agent` (`app/agent/graph.py`) that reads the state and returns the fields it changed |
 | Edge | Which node runs next |
 | Conditional edge | A function that reads the state and picks the next node |
 
-Nodes do not modify the state directly. They return a partial dictionary and
-LangGraph merges it in.
-
 ## Entry point
 
-`app/agent.py` exposes one function:
-
 ```python
-ask(question, history=None) -> dict
+Agent(settings, llm=None).ask(question, history=None, request_id=None) -> dict
 ```
 
-`app/main.py` calls it and returns the result as JSON. Nothing else in the
-project imports the graph.
+`app/main.py` builds one `Agent` at startup and calls `ask` for every `/chat`
+request, passing the request id created at HTTP entry (D55). Evals and tests
+build their own `Agent` with a scripted or real LLM gateway; nothing uses module
+globals.
 
-## State
+## State (main fields)
 
 ```python
 class AgentState(TypedDict, total=False):
-    question: str        # from the user
-    history: list        # last 3 question/SQL pairs
-    sql: str | None      # generated query
-    columns: list        # result column names
-    rows: list           # result rows
-    truncated: bool      # more rows existed than were returned
-    error: str | None    # validation or database error
-    retry_count: int     # 0 or 1
-    out_of_scope: bool   # question was not about the database
-    answer: str          # final sentence shown to the user
+    question: str                  # from the user
+    history: list                  # recent question/SQL turns of the session
+    request_id: str                # shared by every LLM call for this question
+    blocked: bool                  # guard_input rejected the question
+    reply: str                     # the generator's raw reply
+    sql: str | None                # latest SQL (raw until validated)
+    validated: ValidatedQuery | None
+    columns: list
+    rows: list
+    truncated: bool                # more rows existed than the row cap
+    limit_reached: bool            # the query's own LIMIT was reached
+    error: str | None              # an error code, never database text
+    error_detail: str | None       # for the repair prompt only
+    repairable: bool
+    retry_count: int
+    max_repairs: int               # MAX_REPAIR_ATTEMPTS (default 1, at most 3)
+    out_of_scope: bool
+    needs_clarification: bool
+    answer: str
+    answer_checks: list[str]       # check_answer findings
+    usage: dict[str, int]          # tokens for this question
 ```
 
 ## The graph
 
 ```mermaid
 flowchart TD
-    S([start]) --> G[generate_sql]
-    G --> V[validate]
+    S([start]) --> G[guard_input]
+    G -->|blocked| X([end])
+    G --> Q[generate_sql]
+    Q --> C[classify_intent]
+    C -->|refusal or clarifying question| X
+    C -->|SQL| V[validate]
     V --> E[execute]
-    E --> R{route}
-    R -->|error and retry_count == 0| T[retry]
-    R -->|otherwise| F[format_answer]
-    T --> V
-    F --> X([end])
+    E -->|repairable error and retries left| R[retry]
+    E -->|otherwise| F[format_answer]
+    R --> V
+    F --> K[check_answer]
+    K --> X
 ```
 
 ## Nodes
 
-**`generate_sql`** — one model call. Sends the schema, the question and any
-history. If the reply contains `OUT_OF_SCOPE`, it sets that flag and a fixed
-answer; the later nodes then skip their work.
+| Node | Model call | What it does |
+|---|---|---|
+| `guard_input` | none | Rejects empty, over-long (500 characters) or non-text questions with a fixed reply and `INPUT_*` code |
+| `generate_sql` | `sql_generator` | Sends the system prompt with the schema, the session history and the question; returns SQL or a token (`READ_ONLY`, `CLARIFY`, `OUT_OF_SCOPE`) |
+| `classify_intent` | none | Decides what the reply is: a write request (fixed read-only reply), out of scope (fixed reply), a clarifying question (returned as the answer), or SQL |
+| `validate` | none | `validate_sql()`: sqlglot parse, single `SELECT`, allowlisted tables, no forbidden functions, `LIMIT` rewritten to the row cap. Failure sets an error code |
+| `execute` | none | Runs the validated query through the read-only executor. Skipped if validation failed |
+| `retry` | `sql_repair` | Sends the failed SQL and its error back and asks for a fix; increments `retry_count` |
+| `format_answer` | `synthesizer` | Turns up to 20 rows into an answer, with notes when rows are hidden, capped or limited. Errors get a fixed reply per code instead |
+| `check_answer` | none | Adds a missing disclosure (empty, capped or limited result) and records numbers the rows do not support (D29) |
 
-**`validate`** — no model, no database. Calls `validate_sql()`, which checks the
-statement starts with SELECT or WITH, contains no forbidden keyword, and is a
-single statement. Strips comments first so keywords cannot hide behind them. On
-failure it writes a message into `error`.
-
-**`execute`** — runs the query through `app/db.py`. Returns early if the question
-was out of scope or validation already failed. `run_query` never raises; SQL
-errors come back in the `error` field so the retry step can use them.
-
-**`retry`** — one model call, at most once. Sends the failed SQL and the exact
-error back to the model and asks for a correction. Sets `retry_count = 1`.
-
-**`format_answer`** — one model call. Turns the rows into a sentence. Skipped for
-out-of-scope questions and for errors, which both have fixed replies.
-
-## The one branch
+## The repair loop
 
 ```python
 def route_after_execute(state):
-    if state.get("error") and state.get("retry_count", 0) == 0:
+    if (
+        state.get("error")
+        and state.get("repairable")
+        and state.get("retry_count", 0) < state.get("max_repairs", 1)
+    ):
         return "retry"
     return "answer"
 ```
 
-This is the only decision in the graph.
+Only repairable codes earn a repair: `PARSE_ERROR`, `UNKNOWN_TABLE`,
+`EXECUTION_ERROR` (for example an unknown column) and `INVALID_LIMIT`. A
+forbidden write, a stacked statement or a timeout is final, because retrying it
+spends a Groq request with no chance of a safe, useful result (D20).
 
-**Why an infinite loop is impossible:** the retry node sets `retry_count = 1`.
-When the retried query fails, the router sees `retry_count == 1` and sends the
-flow to `format_answer`, which ends. There is no path back to `retry` a second
-time. This is enforced by the graph's shape, not by a guard that could be
-removed.
+**Why the loop always ends:** `retry` increments `retry_count`, and the router
+stops once it reaches `max_repairs` (`MAX_REPAIR_ATTEMPTS`, validated to 0-3).
 
-**Why retry goes back to `validate`, not `execute`:** SQL from the retry call is
-exactly as untrusted as SQL from the first call, so it passes through the same
-check.
+**Why retry goes back to `validate`, not `execute`:** repaired SQL is exactly as
+untrusted as the first attempt, so it passes the same checks.
 
 ## Error handling
 
 | Failure | What happens |
 |---|---|
-| Model returns non-SELECT SQL | Validator rejects it, one retry with the reason |
-| Model invents a column | SQLite rejects it, one retry with SQLite's message |
-| Retry also fails | Fixed error message, no third model call |
-| Question is out of scope | Fixed reply, database never touched |
-| Groq is down or rate-limited | Caught in `main.py`, generic message returned, real error logged server-side only |
-
-## Guardrails
-
-| Where | What |
-|---|---|
-| `main.py` | Question must be 1-500 characters (rejected with 422 before the agent runs) |
-| `prompts.py` | Scope and injection instructions — reduce bad requests, do not prevent them |
-| `validator.py` | SELECT only, single statement, no forbidden keywords |
-| `db.py` | Read-only connection, SQLite authorizer, 200-row cap, 5-second timeout |
-| `frontend/app.js` | Model output inserted with `textContent`, never `innerHTML` |
-
-Only the `prompts.py` row depends on the model cooperating. The others hold
-regardless of what the model returns.
+| The model writes a non-`SELECT` statement | The validator rejects it (`FORBIDDEN_WRITE` and similar); final, fixed reply |
+| The model invents a column or table | A repairable code; one repair with the error, then validation again |
+| The repair also fails | Fixed reply for the code; no further model call |
+| Out-of-scope or write request | Fixed reply; the database is never touched |
+| Groq busy, down or the model retired | The client retries, honours `retry-after`, falls back; if all fail, an `LLM_*` code and a fixed reply (D23) |
+| Only the answer call fails | The rows are still returned, with a fixed note that the summary is unavailable |
+| Anything unexpected | Caught in `app/main.py`: `internal_error`, logged with its type and stack only (H5) |
 
 ## Conversation memory
 
-History lives on the server in a dictionary keyed by `session_id`. The browser
-sends only a question and a session id — never prior turns.
-
-Only successful queries are stored. Replaying failed SQL would feed the model
-its own mistakes. The last 3 pairs are replayed as alternating user/assistant
-messages, which is what lets "and what about Pune?" work.
-
-Memory is lost when the server restarts. That is acceptable here and documented
-as a limitation.
+History lives on the server, keyed by `session_id`; the browser sends only a
+question and the session id. Only successful queries and clarifying exchanges
+are stored, so the model is never fed its own failed SQL. The last
+`MAX_HISTORY_TURNS` (default 3) turns are replayed as user/assistant messages,
+which is what lets "and what about Pune?" work. Memory is process-local and lost
+on restart (L3).
