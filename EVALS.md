@@ -158,3 +158,25 @@ Fixed on 27 Sep 2026, before any judge score was seen.
   docstring has the flags). A judge run writes `manifest.json`,
   `judgments.jsonl`, `calls.jsonl` and, after `agree`, `agreement.md` to
   `evals/reports/<date>-<tag>/`.
+
+### Calibration result (27 Sep 2026)
+
+Run `2026-09-27-judge-calib-qwen3.8-27b`: 26 items, 0 errors, 0 parse failures.
+
+| Criterion | Within 1 | Pass/fail match | Trusted |
+|---|---|---|---|
+| faithfulness | 96% | 96% | yes |
+| relevance | 88% | 88% | yes |
+| completeness | 88% | 88% | yes |
+| honesty | 88% | 77% | no |
+| sql_intent | 85% | 73% | no |
+| clarity | 92% | 88% | yes |
+
+**Decision (D46):** faithfulness, relevance, completeness and clarity are trusted;
+honesty and sql_intent are not used in Phase 7 decisions. SQL correctness is
+already measured by execution accuracy. Label provenance and the rule against
+re-scoring a revised rubric on these labels are recorded in D46.
+
+**Found while labelling:** golden reference issues (L20), false partial-result
+warnings on complete results (L21), and the scope of the cancelled-orders rule
+(D45).
