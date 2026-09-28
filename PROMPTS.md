@@ -52,8 +52,8 @@ Rules (D42):
 | `sql_gen` | v2, v3, v4 (with `schema.v1`) | `sql_gen@d5145f66`, `sql_gen@485384f7`, `sql_gen@8c7d4fa8` | Candidates: experiments 3, 4, 6; not active | Pre-registered (D53) |
 | `sql_repair` | v1 (with `schema.v1`) | `sql_repair@a5c30252` | Replaced by v2 (D50) | D41; repair run 26 Sep 2026 |
 | `sql_repair` | v2 (with `schema.v1`) | `sql_repair@cbe7c9f7` | Active since experiment 1 | D50; `2026-09-27-exp1-repair-v2` |
-| `answer` | v1 (with `answer_notes.v1`) | `answer@3c3a3566` | Active; Phase 7 baseline | D41; synthesizer run 26 Sep 2026 |
-| `answer` | v2 (with `answer_notes.v1`) | `answer@4b837d88` | Candidate: experiment 2; not active | Pre-registered (D53) |
+| `answer` | v1 (with `answer_notes.v1`) | `answer@3c3a3566` | Replaced by v2 (D59) | D41; synthesizer run 26 Sep 2026 |
+| `answer` | v2 (with `answer_notes.v1`) | `answer@4b837d88` | Active since experiment 2 | D59; `2026-09-28-exp2-answer-v1`, `2026-09-28-exp2-answer-v2` |
 
 v1 is the text in use since Phase 5, moved into files byte for byte: the ids
 did not change.
@@ -112,10 +112,13 @@ tables. The detail is sent to the model only, never to the user (README H1).
 
 Turns result rows into one or two sentences.
 
-Text: [`answer.v1.md`](app/prompts/answer.v1.md): answer directly, amounts in
+Text: [`answer.v2.md`](app/prompts/answer.v2.md): answer directly, amounts in
 rupees (`Rs 33,895`), say so plainly when nothing matched, mention truncation,
-invent no numbers. `check_answer` then adds any missing disclosure in code
-(D29).
+invent no numbers. v2 adds two rules (D59): the user sees every returned row in
+a table, so warn about hidden rows only when a note says the result was
+truncated or the query's LIMIT was reached; and a question that asked for N
+rows and got exactly N is complete. `check_answer` then adds any missing
+disclosure in code (D29).
 
 **This is the only call that sends database contents to the provider.** Up to 20
 result rows go with it. The demo data is fake (all emails are `example.com`), so
@@ -216,3 +219,4 @@ Phase 7 pull request.
 | 25 Sep 2026 (Phase 5) | **Experiment: CLARIFY rule.** Hypothesis: an explicit rule stops the model silently guessing on ambiguous questions (baseline b08 guessed "best" = top 10 by spend). Change: one paragraph in the SQL prompt's SCOPE section (`sql_gen@27e9e81d` → `sql_gen@5fb4fe06`). Measured on the 15-item baseline, same grader: b08 changed from a silent guess to a clarifying question; the other 14 items unchanged; input tokens +1.3% (12,964 → 13,127). **Kept.** Caveat: one ambiguous item; Phase 6 checks for over-triggering on clear questions. | `evals/baseline/results/*_after-clarify.jsonl`, README D27 |
 | 27 Sep 2026 (Phase 7) | No prompt text changed. Prompts moved from `app/prompts.py` into versioned files (`app/prompts/*.v1.*`) with a loader, released-file hash pins and snapshot tests. The ids are unchanged: `sql_gen@5fb4fe06`, `sql_repair@a5c30252`, `answer@3c3a3566`, so D41 remains the baseline. | `app/prompts/`, README D42, T14 |
 | 27 Sep 2026 (Phase 7) | **Experiment 1: domain rules in the repair prompt.** Hypothesis: v1 lacks the revenue and cancelled-order rules, so repaired revenue queries include cancelled orders (L14; r01, r08 and r10 failed on every model). Change, one variable: `sql_repair.v2` appends a RULES block (`sql_repair@a5c30252` -> `sql_repair@cbe7c9f7`); same model, temperature, items and pacing as the baseline. Result: repair success 0.700 -> **1.000** (10 items x 3 repeats); r01, r08, r10 0/3 -> 3/3; no item regressed, including the order-count items r03, r05 and r06. **Kept** under the rule fixed before the run. | `evals/reports/2026-09-27-exp1-repair-v2/`, README D50 |
+| 28 Sep 2026 (Phase 7) | **Experiment 2: false partial-result warnings in the answer prompt.** Hypothesis: the answer model reports its own 20-row view as the user's and warns on intended top-N results (L13, L21). Change, one variable: `answer.v2` appends two rules (`answer@3c3a3566` -> `answer@4b837d88`); same model (gpt-oss-120b), temperature 0, 3 repeats, 12 s pacing, v1 and v2 both run on `synthesizer_v2` (s01-s12) the same day. Result: false partial-result warnings (D47) 15/36 -> **6/36**: s06 3/3 -> 0/3; s09, s11, s12 3/3 -> 1/3; s10 unchanged at 3/3. Required disclosures on s03, s04, s05 9/9 in both; faithful 36/36 in both; answer tokens 14,382 -> 18,488 (+29%). **Kept** under the rule fixed before the run (D53). Faithfulness here is the runner's deterministic check (numbers and terms stated and grounded): the judge's case builder replays golden and adversarial SQL only. The runner at this commit predates D54, so these calls log no schema hash; the schema was `207e7a26b02f`. | `evals/reports/2026-09-28-exp2-answer-v1/`, `evals/reports/2026-09-28-exp2-answer-v2/`, README D59 |

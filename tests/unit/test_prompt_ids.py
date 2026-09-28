@@ -15,7 +15,7 @@ from app.prompts.loader import prompt_id
 PINNED_IDS = {
     "sql_gen": "sql_gen@5fb4fe06",
     "sql_repair": "sql_repair@cbe7c9f7",  # v2 since experiment 1 (D50)
-    "answer": "answer@3c3a3566",
+    "answer": "answer@4b837d88",  # v2 since experiment 2 (D59)
 }
 
 
