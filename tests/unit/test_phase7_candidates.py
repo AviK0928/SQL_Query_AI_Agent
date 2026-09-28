@@ -58,6 +58,15 @@ def test_sql_gen_v4_only_adds_rule_7():
     assert len(added) == 2
 
 
+def test_sql_gen_v5_combines_the_kept_changes():
+    """v5 (D63) = v1 + v2's rule 5 (exp 3, D60) + v4's rule 7 (exp 6, D62), nothing else."""
+    added2, removed2 = _added_lines("sql_gen", 2)
+    added4, removed4 = _added_lines("sql_gen", 4)
+    added5, removed5 = _added_lines("sql_gen", 5)
+    assert added5 == added2 + added4 and removed5 == removed2 + removed4
+    assert "LIMIT of at most 100" in system_prompt("sql_gen", 5)[0]  # exp 4 reverted (D61)
+
+
 # --- synthesizer_v2 ---------------------------------------------------------------------
 
 
