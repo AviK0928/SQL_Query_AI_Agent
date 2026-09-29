@@ -154,7 +154,7 @@ prints its value (S3). Environment variables override `.env`.
 pytest -q
 ```
 
-**755 tests (T34), no API key needed, no network calls.** The language model is
+**770 tests (T35), no API key needed, no network calls.** The language model is
 replaced by a scripted fake. The suite is offline by construction, not by
 convention: a guard in `tests/conftest.py` removes every setting from the
 environment and blocks and records any non-loopback network attempt, failing
@@ -450,6 +450,7 @@ recovered and are listed as such rather than invented.
 | T32 | 645 offline tests (644 at T31, plus 1: the judge output cap stays under Groq's 1,000 output-tokens-per-minute limit and at least twice the largest measured verdict). The judge-call test now also expects `max_tokens` (D64). `MIN_TESTS` raised to 645 (T4). | `tests/unit/test_judge_response.py`, `.github/workflows/ci.yml` |
 | T33 | 716 offline tests after rebasing Phase 8 onto `main` at `0d8b8f4`: 713 at T26 plus the 3 tests Phase 7 added after `88ba920` (T31, T32). The counts in T22-T26 are as recorded on the branch before the rebase. `MIN_TESTS` is 716 (T4). | `.github/workflows/ci.yml` |
 | T34 | 755 offline tests after rebasing Phase 9 onto `main` at `7dded8f`: 752 at T29 plus the 3 tests `main` gained after the old Phase 8 tip `beac515` (T31, T32). `MIN_TESTS` is 755 (T4). | `.github/workflows/ci.yml` |
+| T35 | 770 offline tests after rebasing Phase 10 onto `main` at `7a30981`: 767 at T30 plus the 3 tests `main` gained after the old Phase 9 tip `af74be7` (T31, T32). `MIN_TESTS` is 770 (T4). | `.github/workflows/ci.yml` |
 
 ### Data handling
 
@@ -488,6 +489,7 @@ recovered and are listed as such rather than invented.
 | P26 | Phase 7 closed without meeting its DoD in full, by decision (Aviraj, 29 Sep 2026). The final run beat D41 on execution accuracy (0.899 -> 0.970, correctness interval 0.788-0.983 -> 0.900-1.000), but judge scores were flat and refusal and clarity regressed on two ambiguous items with a known cause (L27). v5 was activated anyway: the accuracy gain lies outside the run-to-run noise, and a further experiment would cost another quota day. This overrides the plan's DoD, as P24 overrode the green-CI rule. Numbered after the highest P in the stack (P25). | README D65, L27 |
 | P27 | Phase 7 was squash-merged (#25), so Phase 8 was rebased with `git rebase --onto main 88ba920`. Conflicts were only in the README record tables, `EVALS.md` and `MIN_TESTS`. Table rows were kept from both sides in number order, and a row changed on one side kept that change. Both appended `EVALS.md` sections were kept. The test counts were raised by Phase 7's 3 tests. Code merged without conflicts: the judge call now carries both D54's required `schema_hash` and D64's `max_tokens`. Phases 9-11 are rebased the same way. | `README.md` |
 | P28 | Phase 8 was squash-merged (#26), so Phase 9 was rebased with `git rebase --onto main beac515`. The conflicts were resolved the same way as for Phase 8 (P27): record rows from both sides in number order, test counts raised by the tests on `main`, and both appended doc sections kept. | `README.md` |
+| P29 | Phase 9 was squash-merged (#27), so Phase 10 was rebased with `git rebase --onto main af74be7`, with conflicts resolved as for Phase 8 (P27). | `README.md` |
 
 ### Verification
 
