@@ -132,6 +132,8 @@ JSON with up to 50 rows and the full row count. A reply that is not exactly one
 valid verdict is recorded as a parse failure and never re-asked, so the judge's
 own format compliance is measured.
 
+Every judge call caps its output at 800 tokens (D64): Groq limits `qwen/qwen3.8-27b` to 1,000 output tokens per minute and counts an uncapped call as 2,048, so uncapped calls are refused. Pace judge runs at 60 s (`--min-interval 60`).
+
 **Not yet trusted.** Scores count only after calibration against 20 to 30
 hand-labelled items, with the agreement threshold agreed before the results are
 seen (Section 10d). Candidate judge: qwen3.8-27b, a different family from the

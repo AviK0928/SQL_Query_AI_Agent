@@ -141,11 +141,18 @@ def test_judge_calls_the_judge_role_at_temperature_zero():
     assert llm.roles == [LlmRole.JUDGE]
     assert llm.kwargs[0] == {
         "temperature": 0,
+        "max_tokens": r.JUDGE_MAX_TOKENS,
         "prompt_id": r.JUDGE_PROMPT_ID,
         "request_id": "req-1",
     }
     assert result.verdict is not None and result.error is None
     assert result.tokens == 110
+
+
+def test_judge_output_cap_fits_the_groq_output_limit():
+    # D64: under Groq's 1,000 output-tokens-per-minute limit for the judge model,
+    # and at least twice the largest verdict measured (294 tokens in 88 calls).
+    assert 2 * 294 <= r.JUDGE_MAX_TOKENS < 1000
 
 
 def test_invalid_reply_is_a_recorded_failure_not_an_exception():

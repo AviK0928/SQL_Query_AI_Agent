@@ -9,6 +9,7 @@ Rules (Section 10d, D43):
   Verdict, strictly: integer scores, no missing or extra keys. An invalid reply
   is recorded as a parse failure, never repaired or re-asked, because the
   judge's format compliance is itself measured.
+- Output is capped at JUDGE_MAX_TOKENS on every call (D64).
 - The call goes through the same gateway as every other model call (rate
   limiter, cache, call log) under the `judge` role.
 - The case is sent as JSON, so nothing inside an answer can break out of it.
@@ -34,6 +35,11 @@ RUBRIC_DIR = Path(__file__).parent
 RUBRIC_NAME = "response"
 RUBRIC_VERSION = 1
 JUDGE_ROW_LIMIT = 50
+# Output cap for every judge call (D64). Groq enforces an output-tokens-per-minute
+# limit (qwen/qwen3.8-27b free tier: 1,000) and counts a call without max_tokens as
+# 2,048 expected output tokens, so such calls are refused with a 429. 800 is 2.7x
+# the largest verdict seen in 88 judge calls (294 tokens) and stays under 1,000.
+JUDGE_MAX_TOKENS = 800
 CRITERIA = ("faithfulness", "relevance", "completeness", "honesty", "sql_intent", "clarity")
 
 
@@ -162,6 +168,7 @@ def judge_response(llm: _Llm, case: JudgeCase, *, request_id: str | None = None)
         LlmRole.JUDGE,
         build_judge_messages(case),
         temperature=0,
+        max_tokens=JUDGE_MAX_TOKENS,
         prompt_id=JUDGE_PROMPT_ID,
         request_id=request_id,
     )
