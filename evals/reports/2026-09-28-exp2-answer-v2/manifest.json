@@ -1,0 +1,31 @@
+{
+ "role": "synthesizer",
+ "model": "openai/gpt-oss-120b",
+ "production_model": "openai/gpt-oss-120b",
+ "repeats": 3,
+ "suites": [
+  "synthesizer_v2"
+ ],
+ "ids": [],
+ "temperature": 0,
+ "min_interval_s": 12.0,
+ "commit": "88ba920",
+ "limits": {
+  "rpm": 30,
+  "rpd": 1000,
+  "tpm": 8000,
+  "tpd": 200000
+ },
+ "prompt_ids": {
+  "sql_gen": "sql_gen@5fb4fe06",
+  "sql_repair": "sql_repair@cbe7c9f7",
+  "answer": "answer@4b837d88"
+ },
+ "prompt_overrides": {
+  "answer": 2
+ },
+ "datasets": {
+  "synthesizer_v2": "29b4686ae4a4"
+ },
+ "started_at": "2026-09-28T02:14:12+00:00"
+}

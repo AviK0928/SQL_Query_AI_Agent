@@ -1,0 +1,37 @@
+{
+ "judge_run": "2026-09-29-judge-final-v5-qwen3.8-27b",
+ "judged": 36,
+ "verdicts": 36,
+ "criteria": {
+  "faithfulness": {
+   "mean": 4.722,
+   "pass_rate": 0.917
+  },
+  "relevance": {
+   "mean": 5.0,
+   "pass_rate": 1.0
+  },
+  "completeness": {
+   "mean": 4.75,
+   "pass_rate": 0.917
+  },
+  "clarity": {
+   "mean": 4.944,
+   "pass_rate": 1.0
+  }
+ },
+ "false_disclosure": {
+  "flagged": 8,
+  "of": 108,
+  "items": [
+   "g16/r0",
+   "g35/r0",
+   "g07/r1",
+   "g16/r1",
+   "g35/r1",
+   "g16/r2",
+   "g17/r2",
+   "g35/r2"
+  ]
+ }
+}

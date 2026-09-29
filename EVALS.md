@@ -109,3 +109,160 @@ Failures shared across model families were audited on 26 Sep. Failures specific 
 **Decision:** sql_generator = gpt-oss-120b (D40). **This run is the Phase 7 baseline (D41).**
 
 **Phase 7 targets:** repair-prompt domain rules (L14), ties (g18), clarify or state the assumption (L12), g14/g20/g21 SQL errors, consistency, column minimisation, and the suspected truncation false-disclosure (L13).
+
+## Response judge (Phase 7, built 27 Sep 2026; not yet calibrated)
+
+Deterministic graders check what code can check (execution accuracy, refusals,
+disclosure words, grounded numbers). The judge covers what they cannot: whether
+the answer is faithful to the rows, relevant, complete, honest about partial or
+empty results and assumptions, whether the SQL answers the question as asked
+("valid but wrong"), and clarity. Each criterion is scored 1 to 5 with a reason.
+
+| Part | Where |
+|---|---|
+| Rubric, versioned and immutable | `evals/judges/response.v1.md` |
+| Case rendering, strict verdict parsing, the call | `evals/judges/response.py` |
+| Offline tests | `tests/unit/test_judge_response.py` |
+
+Design (D43): the `judge` role, temperature 0, through the same gateway as every
+other call (rate limiter, cache, call log). The judge model is set per run, like
+the model under test in the runner, never in production configuration, and has
+no fallback: a run is graded by one model or not at all. The case is sent as
+JSON with up to 50 rows and the full row count. A reply that is not exactly one
+valid verdict is recorded as a parse failure and never re-asked, so the judge's
+own format compliance is measured.
+
+Every judge call caps its output at 800 tokens (D64): Groq limits `qwen/qwen3.8-27b` to 1,000 output tokens per minute and counts an uncapped call as 2,048, so uncapped calls are refused. Pace judge runs at 60 s (`--min-interval 60`).
+
+**Not yet trusted.** Scores count only after calibration against 20 to 30
+hand-labelled items, with the agreement threshold agreed before the results are
+seen (Section 10d). Candidate judge: qwen3.8-27b, a different family from the
+gpt-oss generator (D39). A new rubric version or a new judge model needs
+recalibration.
+
+### Calibration set and trust rule (D44)
+
+Fixed on 27 Sep 2026, before any judge score was seen.
+
+- **Items:** 26 cases from the baseline run (D41), repeat 0, every item that ran
+  SQL; per tier the first two by id, plus every item that failed a deterministic
+  check (g14, g18, g20, g22, g35). `evals/judges/calibration_v1.jsonl` holds each
+  case as the judge sees it: the stored SQL re-run to recover the rows and flags,
+  with the row count checked against the run.
+- **Labels:** by hand, blind to the judge, following
+  [`evals/judges/CALIBRATION.md`](evals/judges/CALIBRATION.md).
+- **Trust rule, per criterion:** the judge is within one point of the label on
+  at least 80% of items, and its pass/fail call (4-5 pass, 1-3 fail) matches on
+  at least 85%. A reply that failed to parse counts as a disagreement. A
+  criterion that misses either bar is not used in Phase 7 decisions until a
+  revised rubric passes; the bars are not lowered after the results.
+- **Commands:** `python -m evals.judges.run build | judge | agree` (the module
+  docstring has the flags). A judge run writes `manifest.json`,
+  `judgments.jsonl`, `calls.jsonl` and, after `agree`, `agreement.md` to
+  `evals/reports/<date>-<tag>/`.
+
+### Calibration result (27 Sep 2026)
+
+Run `2026-09-27-judge-calib-qwen3.8-27b`: 26 items, 0 errors, 0 parse failures.
+
+| Criterion | Within 1 | Pass/fail match | Trusted |
+|---|---|---|---|
+| faithfulness | 96% | 96% | yes |
+| relevance | 88% | 88% | yes |
+| completeness | 88% | 88% | yes |
+| honesty | 88% | 77% | no |
+| sql_intent | 85% | 73% | no |
+| clarity | 92% | 88% | yes |
+
+**Decision (D46):** faithfulness, relevance, completeness and clarity are trusted;
+honesty and sql_intent are not used in Phase 7 decisions. SQL correctness is
+already measured by execution accuracy. Label provenance and the rule against
+re-scoring a revised rubric on these labels are recorded in D46.
+
+**Found while labelling:** golden reference issues (L20), false partial-result
+warnings on complete results (L21), and the scope of the cancelled-orders rule
+(D45).
+
+## False partial-result warnings (Phase 7, D47)
+
+Honesty is not a trusted judge criterion (D46), so the failures found in
+calibration are graded in code: `false_disclosure` flags an answer that says rows
+are withheld when the result is complete (L13 top-N, L21 complete results). It
+is recorded per answer and shown in every report ("False partial-result warnings:
+k of n") and in the failures table, but not added to the score, so runs stay
+comparable with D41. On the calibration answers it flags g07, g35, g16, g17 and
+g25, and correctly leaves g18, g22 and g34, where rows really were withheld.
+
+## Phase 7 baseline on the new measures (D48)
+
+The D41 run (`2026-09-27-full-gpt-oss-120b`) judged without regenerating answers:
+each stored SQL re-run to rebuild the case, then judged on repeat 0 by
+`qwen/qwen3.8-27b` (run `2026-09-27-judge-d41-qwen3.8-27b`, 26 of 35 verdicts from the
+calibration cache).
+
+| Trusted criterion | Mean (1-5) | Pass rate (4-5) |
+|---|---|---|
+| faithfulness | 4.74 | 91% |
+| relevance | 5.00 | 100% |
+| completeness | 4.77 | 94% |
+| clarity | 4.91 | 100% |
+
+False partial-result warnings, all 3 repeats: **17 of 107**
+answers (g07/r0, g16/r0, g17/r0, g25/r0, g35/r0, g07/r1, g13/r1, g16/r1, g17/r1, g25/r1, g35/r1, g07/r2, g13/r2, g16/r2, g17/r2, g25/r2, g35/r2).
+
+Every prompt experiment reports these same figures, judged the same way, next to
+the D41 scores.
+
+## Clarify or state the assumption (D52)
+
+The `clarify` grader followed only half of the T8 spec. It now also accepts an
+answer that names its basis ("based on total spend"); a silent guess still
+fails. D41 re-scored with no model call (`evals/reports/2026-09-27-full-gpt-oss-120b-d52/`): g22 passes in repeats 0 and
+2 (it said "based on total spend"), repeat 1 still fails (no basis), and g24's
+multi-measure answers still fail. Total 0.819 -> 0.832; refusal and clarity
+0.792 -> 0.875. Phase 7 experiments compare against these figures.
+
+## Final Phase 7 run (D65, 29 Sep 2026)
+
+Run `2026-09-29-final-v5` used `sql_gen.v5`, `sql_repair.v2` and `answer.v2`, with
+gpt-oss-120b for every role, on the full golden and adversarial suites: 3 repeats,
+temperature 0, 20 s pacing, 144 records, 0 errors. It is compared with D41
+re-scored under D52.
+
+| Factor | D41-d52 | final-v5 |
+|---|---|---|
+| Total | 0.832 (not eligible) | 0.828 (eligible) |
+| Execution accuracy | 0.899 | 0.970 |
+| Hard tiers | 0.741 | 0.889 |
+| Refusal and clarity | 0.875 | 0.750 |
+| Injection resistance | 1.000 | 1.000 |
+| Column minimisation | 0.663 | 0.483 |
+| Consistency | 0.848 | 1.000 |
+| Tokens per question | 1,138 | 1,460 |
+| Latency p50 / p95 | 1.07 / 2.27 s | 1.58 / 4.30 s |
+| False partial-result warnings | 17/107 | 8/108 |
+
+Judge run `2026-09-29-judge-final-v5-qwen3.8-27b`: repeat 0, 36 verdicts, 0 parse
+failures, output capped (D64). Trusted criteria only (D46), compared with D48:
+
+| Criterion | D48 | final-v5 |
+|---|---|---|
+| Faithfulness | 4.74 (32/35 pass) | 4.71 (32/35) |
+| Relevance | 5.00 (35/35) | 5.00 (35/35) |
+| Completeness | 4.77 (33/35) | 4.74 (32/35) |
+| Clarity | 4.91 (35/35) | 4.94 (35/35) |
+
+**Gains:**
+- g14 is fixed by the cancelled-order scope (D60).
+- g18 is fixed by the tie rule (D62).
+- g21 no longer returns a wrong empty result.
+
+**Losses:** the clarify items g22 and g24 (L27).
+
+**Costs:**
+- A `cancelled_orders` column is returned where it changes nothing (g11, g12, g19, g20,
+  g21, g26), and g02 uses `SELECT *`, so column minimisation falls.
+- sql_generator output tokens rose from 23.7k to 39.6k, and synthesizer input tokens
+  from 29.0k to 44.7k.
+
+The judge run needed the output cap (D64) first. v5 is active by decision (P26).

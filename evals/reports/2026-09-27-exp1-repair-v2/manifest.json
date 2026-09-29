@@ -1,0 +1,31 @@
+{
+ "role": "sql_repair",
+ "model": "openai/gpt-oss-120b",
+ "production_model": "openai/gpt-oss-120b",
+ "repeats": 3,
+ "suites": [
+  "repair"
+ ],
+ "ids": [],
+ "temperature": 0,
+ "min_interval_s": 12.0,
+ "commit": "0ac4799",
+ "limits": {
+  "rpm": 30,
+  "rpd": 1000,
+  "tpm": 8000,
+  "tpd": 200000
+ },
+ "prompt_ids": {
+  "sql_gen": "sql_gen@5fb4fe06",
+  "sql_repair": "sql_repair@cbe7c9f7",
+  "answer": "answer@3c3a3566"
+ },
+ "prompt_overrides": {
+  "sql_repair": 2
+ },
+ "datasets": {
+  "repair": "54978e241dcb"
+ },
+ "started_at": "2026-09-27T07:30:02+00:00"
+}

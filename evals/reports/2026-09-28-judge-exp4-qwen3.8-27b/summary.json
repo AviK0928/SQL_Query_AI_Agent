@@ -1,0 +1,44 @@
+{
+ "judge_run": "2026-09-28-judge-exp4-qwen3.8-27b",
+ "judged": 11,
+ "verdicts": 10,
+ "criteria": {
+  "faithfulness": {
+   "mean": 4.3,
+   "pass_rate": 0.8
+  },
+  "relevance": {
+   "mean": 5.0,
+   "pass_rate": 1.0
+  },
+  "completeness": {
+   "mean": 4.5,
+   "pass_rate": 0.8
+  },
+  "clarity": {
+   "mean": 4.9,
+   "pass_rate": 1.0
+  }
+ },
+ "false_disclosure": {
+  "flagged": 15,
+  "of": 30,
+  "items": [
+   "g07/r0",
+   "g16/r0",
+   "g17/r0",
+   "g34/r0",
+   "g35/r0",
+   "g07/r1",
+   "g16/r1",
+   "g17/r1",
+   "g34/r1",
+   "g35/r1",
+   "g07/r2",
+   "g16/r2",
+   "g17/r2",
+   "g34/r2",
+   "g35/r2"
+  ]
+ }
+}

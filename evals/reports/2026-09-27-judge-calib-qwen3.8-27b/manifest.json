@@ -1,0 +1,17 @@
+{
+ "judge_model": "qwen/qwen3.8-27b",
+ "rubric": "response.v1",
+ "judge_prompt_id": "judge_response@a69f7604",
+ "temperature": 0,
+ "cases": "calibration_v1.jsonl",
+ "cases_sha": "2d5dad3b230a",
+ "commit": "b70d671",
+ "limits": {
+  "rpm": 30,
+  "rpd": 1000,
+  "tpm": 8000,
+  "tpd": 200000
+ },
+ "min_interval_s": 25.0,
+ "started_at": "2026-09-27T05:44:54+00:00"
+}

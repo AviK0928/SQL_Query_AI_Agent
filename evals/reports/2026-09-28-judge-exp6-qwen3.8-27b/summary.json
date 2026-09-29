@@ -1,0 +1,28 @@
+{
+ "judge_run": "2026-09-28-judge-exp6-qwen3.8-27b",
+ "judged": 6,
+ "verdicts": 6,
+ "criteria": {
+  "faithfulness": {
+   "mean": 5.0,
+   "pass_rate": 1.0
+  },
+  "relevance": {
+   "mean": 5.0,
+   "pass_rate": 1.0
+  },
+  "completeness": {
+   "mean": 5.0,
+   "pass_rate": 1.0
+  },
+  "clarity": {
+   "mean": 5.0,
+   "pass_rate": 1.0
+  }
+ },
+ "false_disclosure": {
+  "flagged": 0,
+  "of": 18,
+  "items": []
+ }
+}
