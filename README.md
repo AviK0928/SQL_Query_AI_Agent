@@ -185,7 +185,7 @@ prints its value (S3). Environment variables override `.env`.
 pytest -q
 ```
 
-**770 tests (T30), no API key needed, no network calls.** The language model is
+**770 tests (T36), no API key needed, no network calls.** The language model is
 replaced by a scripted fake. The suite is offline by construction, not by
 convention: a guard in `tests/conftest.py` removes every setting from the
 environment and blocks and records any non-loopback network attempt, failing
@@ -257,8 +257,8 @@ names the versioned file) unless `--full` is given.
 
 ## Model selection and eval results
 
-Summary as of 27 Sep 2026; the Phase 7 prompt experiments still to run will
-update it (details in [`EVALS.md`](EVALS.md) and
+Summary as of 29 Sep 2026, after the Phase 7 prompt work (details in
+[`EVALS.md`](EVALS.md), [`PROMPTS.md`](PROMPTS.md) and
 [`MODEL_SELECTION.md`](MODEL_SELECTION.md)).
 
 | Role | Model | Evidence |
@@ -275,6 +275,13 @@ p95 latency 2.27 s. Judge on the same answers (D48): faithfulness 4.74,
 relevance 5.00, completeness 4.77, clarity 4.91 (out of 5). Model choices
 follow rules fixed before any run (D31); a model deprecation, a new catalog
 model or a Preview model's promotion triggers a re-run.
+
+Final prompts (D65): `sql_gen.v5`, `sql_repair.v2` and `answer.v2`, on the same
+suites. Execution accuracy 0.899 -> 0.970, hard tiers 0.741 -> 0.889,
+consistency 0.848 -> 1.000. Judge scores stayed flat: faithfulness 4.71, relevance 5.00,
+completeness 4.74, clarity 4.94. Refusal and clarity fell to 0.750 on two
+ambiguous questions (L27), and tokens per question rose to 1,460. The DoD was
+met on accuracy only, so v5 is active by decision (P26).
 
 ## API
 
@@ -504,6 +511,7 @@ recovered and are listed as such rather than invented.
 | T33 | 716 offline tests after rebasing Phase 8 onto `main` at `0d8b8f4`: 713 at T26 plus the 3 tests Phase 7 added after `88ba920` (T31, T32). The counts in T22-T26 are as recorded on the branch before the rebase. `MIN_TESTS` is 716 (T4). | `.github/workflows/ci.yml` |
 | T34 | 755 offline tests after rebasing Phase 9 onto `main` at `7dded8f`: 752 at T29 plus the 3 tests `main` gained after the old Phase 8 tip `beac515` (T31, T32). `MIN_TESTS` is 755 (T4). | `.github/workflows/ci.yml` |
 | T35 | 770 offline tests after rebasing Phase 10 onto `main` at `7a30981`: 767 at T30 plus the 3 tests `main` gained after the old Phase 9 tip `af74be7` (T31, T32). `MIN_TESTS` is 770 (T4). | `.github/workflows/ci.yml` |
+| T36 | 770 offline tests after rebasing Phase 11 onto `main` at `c210be0`; Phase 11 adds no tests. `MIN_TESTS` stays 770 (T4). | `.github/workflows/ci.yml` |
 
 ### Data handling
 
@@ -544,6 +552,7 @@ recovered and are listed as such rather than invented.
 | P27 | Phase 7 was squash-merged (#25), so Phase 8 was rebased with `git rebase --onto main 88ba920`. Conflicts were only in the README record tables, `EVALS.md` and `MIN_TESTS`. Table rows were kept from both sides in number order, and a row changed on one side kept that change. Both appended `EVALS.md` sections were kept. The test counts were raised by Phase 7's 3 tests. Code merged without conflicts: the judge call now carries both D54's required `schema_hash` and D64's `max_tokens`. Phases 9-11 are rebased the same way. | `README.md` |
 | P28 | Phase 8 was squash-merged (#26), so Phase 9 was rebased with `git rebase --onto main beac515`. The conflicts were resolved the same way as for Phase 8 (P27): record rows from both sides in number order, test counts raised by the tests on `main`, and both appended doc sections kept. | `README.md` |
 | P29 | Phase 9 was squash-merged (#27), so Phase 10 was rebased with `git rebase --onto main af74be7`, with conflicts resolved as for Phase 8 (P27). | `README.md` |
+| P30 | Phase 10 was squash-merged (#28), so Phase 11 was rebased with `git rebase --onto main 6eab11a`, with conflicts resolved as for Phase 8 (P27). The README results summary now reports the final Phase 7 run (D65). | `README.md` |
 
 ### Verification
 
