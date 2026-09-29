@@ -25,7 +25,7 @@ concurrency:
 env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONDONTWRITEBYTECODE: "1"
-  MIN_TESTS: "645"  # raise deliberately when tests are added; CI fails if the count drops (T4)
+  MIN_TESTS: "716"  # raise deliberately when tests are added; CI fails if the count drops (T4)
 
 jobs:
   lint:
@@ -72,6 +72,7 @@ jobs:
           echo "Collected ${count} tests (minimum ${MIN_TESTS})" | tee -a "$GITHUB_STEP_SUMMARY"
           test "${count}" -ge "${MIN_TESTS}"
       - name: pytest
+        # Fails below 100% line + branch coverage of app/ and evals/ (fail_under, T23).
         run: pytest -q --cov --cov-report=term
 
   security:

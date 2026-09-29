@@ -68,3 +68,9 @@ def test_read_only_wins_over_every_other_token():
 
 def test_clarify_is_checked_before_out_of_scope():
     assert classify_reply("CLARIFY: is this OUT_OF_SCOPE for you?").intent is Intent.CLARIFY
+
+
+def test_a_clarifying_question_keeps_its_own_first_letters():
+    """Only the spaces and colon after the token are removed (pinned by mutation testing, T24)."""
+    reply = classify_reply("CLARIFY: X-ray machines, or all equipment?")
+    assert reply.text == "X-ray machines, or all equipment?"

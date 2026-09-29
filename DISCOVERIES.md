@@ -295,6 +295,50 @@ The 67 that remain were each classified rather than chased:
 
 Score: 83.0% of all mutants, 90.1% of the ones a test could possibly kill.
 
+### Mutation testing, second pass (Phase 8)
+
+The first surprise came before any mutant ran: mutmut could not have run at all since
+Phase 6. It copies the code and the tests into `mutants/` and deliberately removes the
+repository from the import path, and its copy list predated `evals/`. Fourteen unit
+test files import `evals`, so the clean test run inside the copy would have failed.
+One line in `also_copy` fixed it.
+
+The validator and executor had not changed since Phase 3, and the rerun proved it:
+the same 394 mutants, the same 67 survivors. The value was in code never mutated
+before, all of it at 100% line and branch coverage. It still left 24 survivors, which
+is the point of the exercise: coverage shows a line ran, not that a test would notice
+it changing. Ten were real gaps:
+
+- **The schema hash was never pinned.** Tests checked it was 12 hex characters and
+  stable, so changing how it is computed would silently move every future call to a
+  new hash. It is now pinned at `207e7a26b02f`, the value every run has recorded.
+- **The `/schema` payload's column names** were never read by a unit test: renaming
+  the `name` key, or filling it with the type, went unnoticed. The full column list
+  is now pinned.
+- **`check_answer`:** `continue` turned into `break` on a boolean cell would have
+  ignored the rest of that row; the rounding rule's two bounds (0.5% of the value,
+  inclusive, and a 0.01 floor for small values) were each untested; and an answer
+  needing no note must come back byte for byte.
+- **`classify_reply`** strips only spaces and a colon after `CLARIFY`; a question
+  starting with X shows it.
+
+The other 14 were classified, as in Phase 3:
+
+- **Equivalent (12).** Seven change the case of SQL keywords or of names in two
+  `sqlite_master` queries: SQL keywords and identifiers are case-insensitive, and so
+  is `LIKE` for ASCII. Three remove `uri=True` from the schema connection, equivalent
+  only because Colab's SQLite honours `file:` names anyway; a new test proves that
+  connection cannot write, which would catch the difference on a build that does not.
+  One replaces the fallback for a NULL `sql` column, which only automatic indexes have,
+  and the hash query excludes those. One changes `check_answer`'s default question
+  from `""` to `"XXXX"`: neither contains a number.
+- **Message wording (2).** The missing-database error keeps naming
+  `database/build_db.py`, which is what its test pins.
+
+A side finding while pinning the hash: the repair and synthesizer suites and the
+judge call the gateway without a schema hash, so 307 of 963 logged calls in the
+committed runs have it empty (L22).
+
 ### Negative tests script the model to comply, not to refuse
 
 The brief requires a test that "Delete all users" is rejected. With a fake model

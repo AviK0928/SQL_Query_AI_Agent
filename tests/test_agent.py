@@ -154,6 +154,23 @@ def test_retry_receives_the_database_error(make_agent):
     assert any("no such column: revenue" in m["content"] for m in retry_messages)
 
 
+@pytest.mark.parametrize(
+    "broken",
+    [
+        "SELECT * FROM customers WHERE (city = 'Delhi'",  # PARSE_ERROR: unbalanced bracket
+        "SELECT name FROM customers LIMIT 2.5",  # INVALID_LIMIT
+    ],
+    ids=["parse-error", "invalid-limit"],
+)
+def test_malformed_sql_is_repaired_and_never_reaches_the_database(make_agent, sql_seen, broken):
+    """The two repairable validator codes no other agent test exercises (D20)."""
+    fake = FakeLLM(broken, "SELECT name FROM customers LIMIT 2", "Two customers were found.")
+    result = make_agent(fake).ask("Show two customers")
+    assert (result["error"], result["sql"]) == (None, "SELECT name FROM customers LIMIT 2")
+    assert fake.roles == [LlmRole.SQL_GENERATOR, LlmRole.SQL_REPAIR, LlmRole.SYNTHESIZER]
+    assert sql_seen == ["SELECT name FROM customers LIMIT 2"]
+
+
 def test_unknown_table_is_repaired(make_agent):
     fake = FakeLLM(
         "SELECT name FROM buyers",  # schema-name mismatch: users say buyers
@@ -500,3 +517,23 @@ def test_check_answer_flags_numbers_not_in_the_rows(make_agent):
 
 def test_check_answer_skips_refusals(make_agent):
     assert make_agent(FakeLLM("OUT_OF_SCOPE")).ask("Write Python")["answer_checks"] == []
+
+
+def test_cache_hits_are_counted_apart_from_calls_and_tokens(make_agent):
+    """A reply served from the response cache spent no quota: it is a cache hit,
+    never a call, and adds no tokens (Phase 9 metrics read these totals)."""
+
+    class SqlFromCache(FakeLLM):
+        def complete(self, role, messages, **kwargs):
+            reply = super().complete(role, messages, **kwargs)
+            reply.cache_hit = role == LlmRole.SQL_GENERATOR
+            return reply
+
+    fake = SqlFromCache("SELECT name FROM customers LIMIT 1", "One.")
+    result = make_agent(fake).ask("One customer")
+    assert result["usage"] == {
+        "calls": 1,
+        "cache_hits": 1,
+        "input_tokens": 100,
+        "output_tokens": 10,
+    }

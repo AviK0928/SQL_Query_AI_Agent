@@ -106,3 +106,46 @@ def test_numbers_inside_words_are_ignored():
 
 def test_normalize_collapses_unicode_space_and_case():
     assert normalize("Showing\u00a0THE\u202f first") == "showing the first"
+
+
+# --- NULL cells ------------------------------------------------------------------
+
+
+def test_null_cells_are_skipped_when_tracing_numbers():
+    """A NULL cell is neither a number nor text: it supports nothing and breaks nothing."""
+    result = check_answer("Aarav Sharma spent Rs 500.", [["Aarav Sharma", None, 500]])
+    assert result.findings == ()
+
+
+def test_a_number_backed_only_by_a_null_is_unsupported():
+    result = check_answer("The average is 42.", [[None]])
+    assert result.findings == (UNSUPPORTED_NUMBERS,)
+
+
+# --- pinned by mutation testing (T24) --------------------------------------------------
+
+
+def test_a_boolean_cell_does_not_hide_the_rest_of_its_row():
+    result = check_answer("Aarav Sharma has 500 points.", [[True, 500]])
+    assert result.findings == ()
+
+
+@pytest.mark.parametrize(
+    ("answer", "rows", "supported"),
+    [
+        ("It is 201.", [[200]], True),
+        ("It is 3.", [[2]], False),
+        ("About 183,500 in total.", [[183530]], True),
+        ("About 182,000 in total.", [[183530]], False),
+    ],
+    ids=["exactly-half-a-percent", "small-values-get-no-slack", "prose-rounding", "too-far"],
+)
+def test_rounding_tolerance_is_half_a_percent_with_a_tiny_floor(answer, rows, supported):
+    """Equal up to 0.5% of the supporting value (inclusive), or 0.01 for small values."""
+    findings = check_answer(answer, rows).findings
+    assert (UNSUPPORTED_NUMBERS not in findings) is supported
+
+
+def test_an_answer_that_needs_no_note_is_returned_verbatim():
+    answer = "  There are 20 customers.\n"
+    assert check_answer(answer, [[20]]).answer == answer

@@ -305,6 +305,7 @@ def run(
     from app.prompts.variants import system_prompt
     from app.sql.errors import SqlSafetyError
     from app.sql.executor import ReadOnlyExecutor
+    from app.sql.schema import Database
     from app.sql.validator import validate_sql
 
     overrides = dict(prompt_versions or {})
@@ -361,6 +362,9 @@ def run(
         print("Aborted.")
         return run_dir, 1
 
+    # Every call records the schema it ran against (principle 8, D54): the agent suites
+    # through the Agent, the role suites here.
+    schema_hash = Database.from_settings(base).schema_hash()
     manifest = {
         "role": role,
         "model": model,
@@ -375,6 +379,7 @@ def run(
         "prompt_ids": prompt_ids,
         "prompt_overrides": overrides,
         "datasets": {s: sha(DATASETS / SUITES[s]) for s in suites},
+        "schema_hash": schema_hash,
         "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
@@ -432,6 +437,7 @@ def run(
                         ),
                         temperature=0,
                         prompt_id=prompt_ids["sql_repair"],
+                        schema_hash=schema_hash,
                     )
                     rows = None
                     try:
@@ -457,6 +463,7 @@ def run(
                         ),
                         temperature=0,
                         prompt_id=prompt_ids["answer"],
+                        schema_hash=schema_hash,
                     )
                     graded = grade_synthesizer(item, reply.content)
                 record.update(

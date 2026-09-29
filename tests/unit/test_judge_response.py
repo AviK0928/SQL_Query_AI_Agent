@@ -137,12 +137,13 @@ def test_parse_rejects_invalid_verdicts(reply):
 
 def test_judge_calls_the_judge_role_at_temperature_zero():
     llm = FakeLLM(json.dumps(GOOD))
-    result = r.judge_response(llm, _case(), request_id="req-1")
+    result = r.judge_response(llm, _case(), request_id="req-1", schema_hash="207e7a26b02f")
     assert llm.roles == [LlmRole.JUDGE]
     assert llm.kwargs[0] == {
         "temperature": 0,
         "max_tokens": r.JUDGE_MAX_TOKENS,
         "prompt_id": r.JUDGE_PROMPT_ID,
+        "schema_hash": "207e7a26b02f",
         "request_id": "req-1",
     }
     assert result.verdict is not None and result.error is None
@@ -156,7 +157,7 @@ def test_judge_output_cap_fits_the_groq_output_limit():
 
 
 def test_invalid_reply_is_a_recorded_failure_not_an_exception():
-    result = r.judge_response(FakeLLM("I think it is good."), _case())
+    result = r.judge_response(FakeLLM("I think it is good."), _case(), schema_hash="h")
     assert result.verdict is None
     assert result.error == "no JSON object in the reply"
     assert result.raw == "I think it is good."
@@ -164,4 +165,31 @@ def test_invalid_reply_is_a_recorded_failure_not_an_exception():
 
 def test_provider_errors_propagate():
     with pytest.raises(RuntimeError, match="provider down"):
-        r.judge_response(FakeLLM(RuntimeError("provider down")), _case())
+        r.judge_response(FakeLLM(RuntimeError("provider down")), _case(), schema_hash="h")
+
+
+# --- rubric files ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("Judge the answer.\n$schema", "must end with a newline"),
+        ("No placeholder here.\n", "exactly one placeholder"),
+        ("$schema and $extra\n", "exactly one placeholder"),
+        ("A stray $ sign and $schema\n", "exactly one placeholder"),
+    ],
+    ids=["no-final-newline", "no-placeholder", "extra-placeholder", "invalid-template"],
+)
+def test_a_malformed_rubric_file_is_refused(tmp_path, monkeypatch, text, message):
+    """A new rubric version fails at import, before any judge call spends quota."""
+    monkeypatch.setattr(r, "RUBRIC_DIR", tmp_path)
+    (tmp_path / f"{r.RUBRIC_NAME}.v9.md").write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        r._render_rubric(9)
+
+
+def test_a_well_formed_rubric_gets_the_schema(tmp_path, monkeypatch):
+    monkeypatch.setattr(r, "RUBRIC_DIR", tmp_path)
+    (tmp_path / f"{r.RUBRIC_NAME}.v9.md").write_text("Schema:\n$schema\n", encoding="utf-8")
+    assert r._render_rubric(9) == f"Schema:\n{r.SCHEMA_DESCRIPTION}"

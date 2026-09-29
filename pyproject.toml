@@ -58,13 +58,22 @@ markers = [
 
 # --- coverage ------------------------------------------------------------
 [tool.coverage.run]
-source = ["app"]
+# evals/ is measured too: its graders and judges produce the numbers behind
+# model and prompt decisions (T22).
+source = ["app", "evals"]
 branch = true
+# The frozen Phase 0 harness: live-only by design, never run offline (T10).
+omit = ["evals/baseline/*"]
 
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
-# fail_under is set in Phase 8 once thresholds are agreed.
+precision = 1
+# Only runs as a script; the main() it calls is tested.
+exclude_also = ['if __name__ == "__main__":']
+# Every scope of app/ and evals/ is held at 100% line + branch (T23), so one
+# global floor is enough: `pytest --cov` fails below it, in CI and in Cell 9.
+fail_under = 100
 
 # --- bandit --------------------------------------------------------------
 [tool.bandit]
@@ -136,6 +145,6 @@ strict_equality = true
 # app/sql/executor.py mutants are tested, selected by name on the command line;
 # all of app/ is listed so imports resolve inside mutmut's mutants/ copy.
 source_paths = ["app/"]
-also_copy = ["database/", "tests/"]
+also_copy = ["database/", "tests/", "evals/"]  # evals/: tests/unit imports it since Phase 6 (T24)
 pytest_add_cli_args_test_selection = ["tests/unit/"]
 pytest_add_cli_args = ["--no-cov", "-p", "no:cacheprovider"]
