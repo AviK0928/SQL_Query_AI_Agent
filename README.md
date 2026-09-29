@@ -153,7 +153,7 @@ prints its value (S3). Environment variables override `.env`.
 pytest -q
 ```
 
-**716 tests (T26), no API key needed, no network calls.** The language model is
+**716 tests (T33), no API key needed, no network calls.** The language model is
 replaced by a scripted fake. The suite is offline by construction, not by
 convention: a guard in `tests/conftest.py` removes every setting from the
 environment and blocks and records any non-loopback network attempt, failing
@@ -405,6 +405,7 @@ recovered and are listed as such rather than invented.
 | T26 | 713 offline tests (706 at T25, plus 7 from the Phase 8 review of every test layer in Section 7). Integration, new: the agent over the real gateway and client with only the transport scripted (`tests/test_llm_stack.py`): a 429 with retry-after waited out exactly, a retired model falling back with the call log saying so, rate limits on every model becoming a coded answer with no query run, a persistent timeout coded without a fallback, and a repeated question answered from the cache with no quota spent. Agent, new: unparseable SQL and an invalid LIMIT repaired without reaching the database, the two repairable codes no agent test covered (D20). Already complete: every unit area Section 7 lists, API tests on every endpoint (`/health`, `/schema`, `/chat`, `/`), rendered-prompt snapshots (T14). Deferred to Phase 10, which defines it: one error schema for API responses and its contract tests. Phase 8 count by `pytest --collect-only`: 713 offline + 6 live. `MIN_TESTS` raised to 713 (T4). | `tests/test_llm_stack.py`, `tests/test_agent.py` |
 | T31 | 644 offline tests (642 at T21, plus 2: the `sql_gen.v5.md` release pin, and a test that v5 is v1 plus exactly v2's rule 5 and v4's rule 7, with rule 3 kept). Numbered after the highest T in the stack (T30). `MIN_TESTS` raised to 644 (T4). | `tests/unit/test_phase7_candidates.py`, `tests/unit/test_prompt_versions.py` |
 | T32 | 645 offline tests (644 at T31, plus 1: the judge output cap stays under Groq's 1,000 output-tokens-per-minute limit and at least twice the largest measured verdict). The judge-call test now also expects `max_tokens` (D64). `MIN_TESTS` raised to 645 (T4). | `tests/unit/test_judge_response.py`, `.github/workflows/ci.yml` |
+| T33 | 716 offline tests after rebasing Phase 8 onto `main` at `0d8b8f4`: 713 at T26 plus the 3 tests Phase 7 added after `88ba920` (T31, T32). The counts in T22-T26 are as recorded on the branch before the rebase. `MIN_TESTS` is 716 (T4). | `.github/workflows/ci.yml` |
 
 ### Data handling
 
@@ -439,6 +440,7 @@ recovered and are listed as such rather than invented.
 | P22 | Two Phase 8 commit messages ended in attribution trailers that do not belong in this repository's history. The three Phase 8 commits were rewritten on 27 Sep 2026 with `git filter-branch --msg-filter` (messages only: each tree, author, committer and date verified identical) and force-pushed with a lease: `0f25a80` → `5f88671`, `d924d66` → `a473c82`, `f478471` → `2be778e`. Records now name the new hashes. Safe only because the branch had no PR and no other clone; `feat/phase-7-prompts` and `main` were untouched. | `feat/phase-8-tests` |
 | P23 | `commit_and_push` v4 (notebook Cell 12) runs pytest with coverage, so the 100% floor (T23) is checked before every commit. v3 ran pytest without coverage, leaving CI and Cell 9 as the only coverage gates, and CI does not run on this branch until the Phase 7 PR. Coverage data goes to `/content`, outside the repository. | `notebooks/dev.ipynb` |
 | P26 | Phase 7 closed without meeting its DoD in full, by decision (Aviraj, 29 Sep 2026). The final run beat D41 on execution accuracy (0.899 -> 0.970, correctness interval 0.788-0.983 -> 0.900-1.000), but judge scores were flat and refusal and clarity regressed on two ambiguous items with a known cause (L27). v5 was activated anyway: the accuracy gain lies outside the run-to-run noise, and a further experiment would cost another quota day. This overrides the plan's DoD, as P24 overrode the green-CI rule. Numbered after the highest P in the stack (P25). | README D65, L27 |
+| P27 | Phase 7 was squash-merged (#25), so Phase 8 was rebased with `git rebase --onto main 88ba920`. Conflicts were only in the README record tables, `EVALS.md` and `MIN_TESTS`. Table rows were kept from both sides in number order, and a row changed on one side kept that change. Both appended `EVALS.md` sections were kept. The test counts were raised by Phase 7's 3 tests. Code merged without conflicts: the judge call now carries both D54's required `schema_hash` and D64's `max_tokens`. Phases 9-11 are rebased the same way. | `README.md` |
 
 ### Verification
 
