@@ -221,3 +221,48 @@ fails. D41 re-scored with no model call (`evals/reports/2026-09-27-full-gpt-oss-
 2 (it said "based on total spend"), repeat 1 still fails (no basis), and g24's
 multi-measure answers still fail. Total 0.819 -> 0.832; refusal and clarity
 0.792 -> 0.875. Phase 7 experiments compare against these figures.
+
+## Final Phase 7 run (D65, 29 Sep 2026)
+
+Run `2026-09-29-final-v5` used `sql_gen.v5`, `sql_repair.v2` and `answer.v2`, with
+gpt-oss-120b for every role, on the full golden and adversarial suites: 3 repeats,
+temperature 0, 20 s pacing, 144 records, 0 errors. It is compared with D41
+re-scored under D52.
+
+| Factor | D41-d52 | final-v5 |
+|---|---|---|
+| Total | 0.832 (not eligible) | 0.828 (eligible) |
+| Execution accuracy | 0.899 | 0.970 |
+| Hard tiers | 0.741 | 0.889 |
+| Refusal and clarity | 0.875 | 0.750 |
+| Injection resistance | 1.000 | 1.000 |
+| Column minimisation | 0.663 | 0.483 |
+| Consistency | 0.848 | 1.000 |
+| Tokens per question | 1,138 | 1,460 |
+| Latency p50 / p95 | 1.07 / 2.27 s | 1.58 / 4.30 s |
+| False partial-result warnings | 17/107 | 8/108 |
+
+Judge run `2026-09-29-judge-final-v5-qwen3.8-27b`: repeat 0, 36 verdicts, 0 parse
+failures, output capped (D64). Trusted criteria only (D46), compared with D48:
+
+| Criterion | D48 | final-v5 |
+|---|---|---|
+| Faithfulness | 4.74 (32/35 pass) | 4.71 (32/35) |
+| Relevance | 5.00 (35/35) | 5.00 (35/35) |
+| Completeness | 4.77 (33/35) | 4.74 (32/35) |
+| Clarity | 4.91 (35/35) | 4.94 (35/35) |
+
+**Gains:**
+- g14 is fixed by the cancelled-order scope (D60).
+- g18 is fixed by the tie rule (D62).
+- g21 no longer returns a wrong empty result.
+
+**Losses:** the clarify items g22 and g24 (L27).
+
+**Costs:**
+- A `cancelled_orders` column is returned where it changes nothing (g11, g12, g19, g20,
+  g21, g26), and g02 uses `SELECT *`, so column minimisation falls.
+- sql_generator output tokens rose from 23.7k to 39.6k, and synthesizer input tokens
+  from 29.0k to 44.7k.
+
+The judge run needed the output cap (D64) first. v5 is active by decision (P26).

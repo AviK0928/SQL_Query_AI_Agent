@@ -229,10 +229,15 @@
            aggregate value.
         4. Revenue and order totals must use order_items.unit_price * quantity, not
            products.price, because unit_price is what the customer actually paid.
-        5. Unless the user says otherwise, exclude orders with status 'cancelled'
-           from revenue and sales totals.
+        5. Cancelled orders were placed but never paid for. Unless the user says
+           otherwise: include them when counting or listing orders, and exclude them
+           from revenue, spend, turnover and units sold. When cancelled orders change
+           the result either way, also return how many there were in a separate
+           column (for example cancelled_orders), so the answer can mention them.
         6. Dates are text in 'YYYY-MM-DD' form, so normal comparison operators work.
            Use strftime('%Y', order_date) to extract a year.
+        7. When the question asks for the top, most or least of something, keep every
+           row tied at the cut-off: filter on that value rather than cutting with LIMIT.
         
         SCOPE
         If the question asks to change the data -- insert, update, delete, drop, or
@@ -302,10 +307,15 @@
            aggregate value.
         4. Revenue and order totals must use order_items.unit_price * quantity, not
            products.price, because unit_price is what the customer actually paid.
-        5. Unless the user says otherwise, exclude orders with status 'cancelled'
-           from revenue and sales totals.
+        5. Cancelled orders were placed but never paid for. Unless the user says
+           otherwise: include them when counting or listing orders, and exclude them
+           from revenue, spend, turnover and units sold. When cancelled orders change
+           the result either way, also return how many there were in a separate
+           column (for example cancelled_orders), so the answer can mention them.
         6. Dates are text in 'YYYY-MM-DD' form, so normal comparison operators work.
            Use strftime('%Y', order_date) to extract a year.
+        7. When the question asks for the top, most or least of something, keep every
+           row tied at the cut-off: filter on that value rather than cutting with LIMIT.
         
         SCOPE
         If the question asks to change the data -- insert, update, delete, drop, or

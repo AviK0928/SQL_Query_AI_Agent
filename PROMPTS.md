@@ -48,11 +48,11 @@ Rules (D42):
 
 | Prompt | Version | Id | Status | Evidence |
 |---|---|---|---|---|
-| `sql_gen` | v1 (with `schema.v1`) | `sql_gen@5fb4fe06` | Active; Phase 7 baseline | D41 |
+| `sql_gen` | v1 (with `schema.v1`) | `sql_gen@5fb4fe06` | Replaced by v5 (D65); Phase 7 baseline | D41 |
 | `sql_gen` | v2 (with `schema.v1`) | `sql_gen@d5145f66` | Kept in experiment 3, combined into v5 | D60; `2026-09-28-exp3-sql-gen-v2` |
 | `sql_gen` | v3 (with `schema.v1`) | `sql_gen@485384f7` | Reverted in experiment 4 | D61; `2026-09-28-exp4-sql-gen-v3` |
 | `sql_gen` | v4 (with `schema.v1`) | `sql_gen@8c7d4fa8` | Kept in experiment 6, combined into v5 | D62; `2026-09-28-exp6-sql-gen-v4` |
-| `sql_gen` | v5 (with `schema.v1`) | `sql_gen@43cea818` | Candidate: v1 + v2's rule 5 + v4's rule 7, for the final Phase 7 run; not active | D63 |
+| `sql_gen` | v5 (with `schema.v1`) | `sql_gen@43cea818` | Active since the final Phase 7 run (by decision, P26): v1 + v2's rule 5 + v4's rule 7 | D63, D65; `2026-09-29-final-v5` |
 | `sql_repair` | v1 (with `schema.v1`) | `sql_repair@a5c30252` | Replaced by v2 (D50) | D41; repair run 26 Sep 2026 |
 | `sql_repair` | v2 (with `schema.v1`) | `sql_repair@cbe7c9f7` | Active since experiment 1 | D50; `2026-09-27-exp1-repair-v2` |
 | `answer` | v1 (with `answer_notes.v1`) | `answer@3c3a3566` | Replaced by v2 (D59) | D41; synthesizer run 26 Sep 2026 |
@@ -68,6 +68,8 @@ did not change.
 Turns a question into a SELECT query, or replies with a token. Sends the schema,
 the question, and up to `MAX_HISTORY_TURNS` (default 3) earlier question/SQL
 pairs, replayed as user/assistant turns. No row data.
+
+**Active: [`sql_gen.v5.md`](app/prompts/sql_gen.v5.md) (D65).** It is v1 with rule 5 rewritten for the cancelled-order scope (D60) and rule 7 added for ties at a ranking cut-off (D62). The description below is of v1.
 
 Text: [`sql_gen.v1.md`](app/prompts/sql_gen.v1.md). It has three parts: the
 schema, six numbered rules (SELECT only and no formatting, no invented names,
@@ -228,3 +230,4 @@ Phase 7 pull request.
 | 28 Sep 2026 (Phase 7) | **Experiment 6: ties at a ranking cut-off.** Hypothesis: `LIMIT` at a ranking cut-off drops tied rows (P2, g18). Change, one variable: `sql_gen.v4` adds rule 7 (`sql_gen@8c7d4fa8`); gpt-oss-120b, 3 repeats, temperature 0, 20 s pacing, `sql_repair` and `answer` pinned to v1 so `sql_gen` is the only change from D41 (re-scored, D52), compared on the same items and repeats. Result: g18 0/3 -> **3/3** (both tied cities); the 5 controls stayed 3/3; false warnings on the controls 9 -> 0. **Kept**; combined into v5. | `evals/reports/2026-09-28-exp6-sql-gen-v4/`, README D62 |
 | 28 Sep 2026 (Phase 7) | No run. The kept generator changes combined into one candidate: `sql_gen.v5` (`sql_gen@43cea818`) = v1 + v2's rule 5 + v4's rule 7, pinned by a test to contain exactly those lines. Released and inactive until the final full golden and adversarial run. | `app/prompts/sql_gen.v5.md`, README D63 |
 | 28 Sep 2026 (Phase 7) | No prompt change. Judge scores on repeat 0 for experiments 3, 4 and 6, as pre-registered in section 8 (reported, not part of any keep rule): `qwen/qwen3.8-27b`, rubric `response.v1`, trusted criteria only (D46), 27 verdicts, no parse failures, 35,581 judge tokens, compared item by item with D48. Exp 3: no item below D41 (completeness mean 4.64 -> 4.73). Exp 4: means up, two scores down (g07 faithfulness, g35 completeness), both on answers from the pinned answer v1. Exp 6: 5 throughout. One call hit qwen's per-minute token limit (8,000 TPM) and the run was resumed. | `evals/reports/2026-09-28-judge-exp3-qwen3.8-27b/`, `evals/reports/2026-09-28-judge-exp4-qwen3.8-27b/`, `evals/reports/2026-09-28-judge-exp6-qwen3.8-27b/`; README D60-D62 |
+| 29 Sep 2026 (Phase 7) | **Final run: `sql_gen.v5` activated** (`sql_gen@5fb4fe06` -> `sql_gen@43cea818`). A full golden and adversarial run with `sql_repair.v2` and `answer.v2`, compared with D41 (re-scored, D52) and D48. Execution accuracy 0.899 -> 0.970, hard tiers 0.741 -> 0.889, consistency 0.848 -> 1.000. Refusal and clarity 0.875 -> 0.750 (g22, g24: L27). Judge scores flat: every trusted mean moved by 0.03 or less. The DoD was partly met, so v5 is active by decision (P26). The snapshots of the SQL messages were updated. | `evals/reports/2026-09-29-final-v5/`, `evals/reports/2026-09-29-judge-final-v5-qwen3.8-27b/`; README D65, L27, P26 |
