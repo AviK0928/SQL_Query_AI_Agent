@@ -154,7 +154,7 @@ prints its value (S3). Environment variables override `.env`.
 pytest -q
 ```
 
-**716 tests (T33), no API key needed, no network calls.** The language model is
+**755 tests (T34), no API key needed, no network calls.** The language model is
 replaced by a scripted fake. The suite is offline by construction, not by
 convention: a guard in `tests/conftest.py` removes every setting from the
 environment and blocks and records any non-loopback network attempt, failing
@@ -434,6 +434,7 @@ recovered and are listed as such rather than invented.
 | T31 | 644 offline tests (642 at T21, plus 2: the `sql_gen.v5.md` release pin, and a test that v5 is v1 plus exactly v2's rule 5 and v4's rule 7, with rule 3 kept). Numbered after the highest T in the stack (T30). `MIN_TESTS` raised to 644 (T4). | `tests/unit/test_phase7_candidates.py`, `tests/unit/test_prompt_versions.py` |
 | T32 | 645 offline tests (644 at T31, plus 1: the judge output cap stays under Groq's 1,000 output-tokens-per-minute limit and at least twice the largest measured verdict). The judge-call test now also expects `max_tokens` (D64). `MIN_TESTS` raised to 645 (T4). | `tests/unit/test_judge_response.py`, `.github/workflows/ci.yml` |
 | T33 | 716 offline tests after rebasing Phase 8 onto `main` at `0d8b8f4`: 713 at T26 plus the 3 tests Phase 7 added after `88ba920` (T31, T32). The counts in T22-T26 are as recorded on the branch before the rebase. `MIN_TESTS` is 716 (T4). | `.github/workflows/ci.yml` |
+| T34 | 755 offline tests after rebasing Phase 9 onto `main` at `7dded8f`: 752 at T29 plus the 3 tests `main` gained after the old Phase 8 tip `beac515` (T31, T32). `MIN_TESTS` is 755 (T4). | `.github/workflows/ci.yml` |
 
 ### Data handling
 
@@ -471,6 +472,7 @@ recovered and are listed as such rather than invented.
 | P24 | Phase 9 started before Phase 8 had green CI (decision, 27 Sep 2026). The plan says no phase starts before the previous one is committed with green CI, but CI runs only on PRs and pushes to `main`, and no PR is opened for Phase 7 or 8 until the remaining gpt-oss-120b Phase 7 runs are done and reviewed (L23). `feat/phase-9-observability` is stacked on `feat/phase-8-tests` at `beac515`, so it keeps the 100% coverage gate; every commit passes the local gate (`commit_and_push` v4). Merge order: Phase 7, then Phase 8 rebased onto `main`, then Phase 9. | `feat/phase-9-observability` |
 | P26 | Phase 7 closed without meeting its DoD in full, by decision (Aviraj, 29 Sep 2026). The final run beat D41 on execution accuracy (0.899 -> 0.970, correctness interval 0.788-0.983 -> 0.900-1.000), but judge scores were flat and refusal and clarity regressed on two ambiguous items with a known cause (L27). v5 was activated anyway: the accuracy gain lies outside the run-to-run noise, and a further experiment would cost another quota day. This overrides the plan's DoD, as P24 overrode the green-CI rule. Numbered after the highest P in the stack (P25). | README D65, L27 |
 | P27 | Phase 7 was squash-merged (#25), so Phase 8 was rebased with `git rebase --onto main 88ba920`. Conflicts were only in the README record tables, `EVALS.md` and `MIN_TESTS`. Table rows were kept from both sides in number order, and a row changed on one side kept that change. Both appended `EVALS.md` sections were kept. The test counts were raised by Phase 7's 3 tests. Code merged without conflicts: the judge call now carries both D54's required `schema_hash` and D64's `max_tokens`. Phases 9-11 are rebased the same way. | `README.md` |
+| P28 | Phase 8 was squash-merged (#26), so Phase 9 was rebased with `git rebase --onto main beac515`. The conflicts were resolved the same way as for Phase 8 (P27): record rows from both sides in number order, test counts raised by the tests on `main`, and both appended doc sections kept. | `README.md` |
 
 ### Verification
 
