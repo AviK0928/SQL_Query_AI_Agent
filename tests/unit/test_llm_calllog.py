@@ -217,9 +217,64 @@ def test_logger_is_built_from_settings(tmp_path):
         groq_model="big",
         llm_limits={"big": LIMITS.model_dump()},
         llm_log_content=True,
+        llm_log_max_chars=1234,
         llm_log_path=tmp_path / "calls.jsonl",
     )
     call_log = CallLogger.from_settings(settings)
     assert call_log.log_content is True
+    assert call_log.max_chars == 1234
     assert call_log.path == tmp_path / "calls.jsonl"
     assert call_log.secrets == (KEY,)
+
+
+# --- content size cap (D56) ------------------------------------------------------------
+
+
+def _ctx(*contents):
+    messages = [{"role": "user", "content": c} for c in contents]
+    return CallContext(
+        role=ROLE,
+        messages=messages,
+        request_model="big",
+        temperature=0.0,
+        max_tokens=None,
+        prompt_id="p",
+        schema_hash="h",
+        request_id="req-cap",
+    )
+
+
+def test_long_messages_and_replies_are_clipped_with_a_marker():
+    lines = []
+    call_log = CallLogger(log_content=True, max_chars=10, sink=lines.append)
+    call_log.success(result(content="R" * 25), _ctx("short", "Q" * 13))
+    rec = json.loads(lines[0])
+    assert [m["content"] for m in rec["gen_ai.input.messages"]] == [
+        "short",
+        "Q" * 10 + "...[clipped 3 chars]",
+    ]
+    assert rec["gen_ai.output.text"] == "R" * 10 + "...[clipped 15 chars]"
+    assert rec["llm.input_chars"] == 18, "metadata keeps the true size"
+
+
+def test_text_exactly_at_the_cap_is_kept_whole():
+    lines = []
+    call_log = CallLogger(log_content=True, max_chars=4, sink=lines.append)
+    call_log.success(result(content="SELE"), _ctx("abcd"))
+    rec = json.loads(lines[0])
+    assert rec["gen_ai.input.messages"][0]["content"] == "abcd"
+    assert rec["gen_ai.output.text"] == "SELE"
+
+
+def test_a_secret_cut_by_the_cap_is_still_redacted():
+    lines = []
+    call_log = CallLogger(log_content=True, max_chars=12, secrets=[KEY], sink=lines.append)
+    call_log.success(result(content=f"key {KEY}"), _ctx(f"my key is {KEY}"))
+    assert KEY[:8] not in lines[0], "no prefix of the key survives the cut"
+    rec = json.loads(lines[0])
+    assert rec["gen_ai.input.messages"][0]["content"] == "my key is **...[clipped 1 chars]"
+    assert rec["gen_ai.output.text"] == "key ***"
+
+
+def test_the_default_cap_is_the_settings_default(test_settings):
+    assert CallLogger().max_chars == test_settings.llm_log_max_chars == 4000

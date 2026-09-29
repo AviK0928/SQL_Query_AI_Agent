@@ -4,8 +4,13 @@ Errors are returned as HTTP 200 with a populated field rather than as HTTP
 error codes, so the frontend has one response shape to handle. A failed query
 is a normal outcome of this application, not a transport failure. The `error`
 field carries an error code (app/sql/errors.py, or an LLM_* code from
-app/llm/client.py), never database or provider text. `request_id` ties a
-response to its LLM call-log lines.
+app/llm/client.py), never database or provider text.
+
+Every request gets a `request_id` at HTTP entry (app/observability/, D55). It
+is returned in the `X-Request-ID` header and, for /chat, in the body, and it is
+on every log line and LLM call-log line for that request. Logs are JSON lines
+on stdout (configure_logging); an unhandled error is logged with its type and
+stack, never its message (H5).
 
 The app is built by create_app(settings, llm=None). Settings are validated
 before anything else is constructed, so a missing GROQ_API_KEY or GROQ_MODEL
@@ -16,6 +21,7 @@ ReadOnlyExecutor and SessionStore are the beans it wires together.
 
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from collections import OrderedDict
@@ -29,11 +35,15 @@ from pydantic import BaseModel, Field
 
 from app.agent import Agent
 from app.config import DEFAULT_ENV_FILE, PROJECT_ROOT, Settings, load_settings
+from app.observability.logs import configure_logging
+from app.observability.middleware import request_id_middleware
 
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 INDEX_FILE = FRONTEND_DIR / "index.html"
 MAX_SESSIONS = 500
 ENV_FILE: Path | None = DEFAULT_ENV_FILE  # tests set this to None to ignore a local .env
+
+logger = logging.getLogger(__name__)
 
 
 class ChatRequest(BaseModel):
@@ -89,8 +99,10 @@ def create_app(settings: Settings | None = None, *, llm: Any = None) -> FastAPI:
     """Build the application. `llm` is injected by tests; production builds Groq."""
     if settings is None:
         settings = load_settings(env_file=ENV_FILE)  # raises ConfigError on bad config
+    configure_logging(secrets=[settings.groq_api_key.get_secret_value()])
 
     app = FastAPI(title="SQL Query AI Agent", version="1.1.0")
+    app.middleware("http")(request_id_middleware)
     app.state.settings = settings
     app.state.agent = Agent(settings, llm=llm)
     app.state.sessions = SessionStore(MAX_SESSIONS, settings.max_history_turns)
@@ -110,12 +122,14 @@ def create_app(settings: Settings | None = None, *, llm: Any = None) -> FastAPI:
         agent: Agent = request.app.state.agent
         sessions: SessionStore = request.app.state.sessions
         session_id = body.session_id or str(uuid.uuid4())
+        request_id: str = request.state.request_id  # set by request_id_middleware
 
         try:
-            result = agent.ask(body.question, sessions.get(session_id))
-        except Exception as exc:
+            result = agent.ask(body.question, sessions.get(session_id), request_id=request_id)
+        except Exception:
             # Never leak a stack trace or a provider error verbatim to the client.
-            print(f"[chat] unhandled error: {type(exc).__name__}")
+            # The log gets the type and stack, not the message (H5).
+            logger.exception("chat.unhandled_error")
             return JSONResponse(
                 status_code=200,
                 content={
@@ -128,7 +142,7 @@ def create_app(settings: Settings | None = None, *, llm: Any = None) -> FastAPI:
                     "error": "internal_error",
                     "out_of_scope": False,
                     "session_id": session_id,
-                    "request_id": None,
+                    "request_id": request_id,
                     "needs_clarification": False,
                 },
             )

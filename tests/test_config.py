@@ -52,6 +52,7 @@ def test_minimal_valid_settings_use_defaults():
     assert s.llm_max_attempts == 3
     assert s.llm_cache_path is None
     assert s.llm_log_content is False
+    assert s.llm_log_max_chars == 4000
     assert s.llm_log_path is None
 
 
@@ -171,6 +172,7 @@ def test_unknown_role_is_refused():
         ({"llm_timeout_s": 0}, "LLM_TIMEOUT_S"),
         ({"llm_max_attempts": 0}, "LLM_MAX_ATTEMPTS"),
         ({"llm_role_models": {"synthesizer": " "}}, "LLM_ROLE_MODELS"),
+        ({"llm_log_max_chars": 0}, "LLM_LOG_MAX_CHARS"),
     ],
 )
 def test_invalid_values_are_refused_with_their_name(overrides, bad_var):

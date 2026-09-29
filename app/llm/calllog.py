@@ -1,10 +1,18 @@
 """Structured LLM call log: one JSON line per call, success or failure.
 
-Field names follow the OpenTelemetry GenAI conventions where they fit
-(gen_ai.request.model, gen_ai.usage.input_tokens, error.type, ...) so Phase 9
-tracing can map onto them; project fields use an `llm.` prefix.
+This log is the project's view of what the app asks the LLM and what it gets
+back (D56): every call's role (which step made it), model, prompt id, tokens,
+latency, retries, cache hit and outcome, and with LLM_LOG_CONTENT=true the
+messages sent and the reply received. Its `request_id` is the id created at
+HTTP entry (D55), so one question's calls can be read together.
 
-Prompt and response text are included only when LLM_LOG_CONTENT is true.
+Field names follow the OpenTelemetry GenAI conventions where they fit
+(gen_ai.request.model, gen_ai.usage.input_tokens, error.type, ...), a common
+vocabulary for LLM logs; project fields use an `llm.` prefix.
+
+Prompt and response text are included only when LLM_LOG_CONTENT is true. Each
+message and the reply are clipped to LLM_LOG_MAX_CHARS characters, with a
+marker saying how much was cut, so one oversized prompt cannot flood the log.
 Every record is scrubbed of configured secret values (the API key) before it
 is written, whatever field they appear in. Output goes to a JSONL file when
 LLM_LOG_PATH is set, otherwise to stdout (what Render's log viewer shows).
@@ -34,6 +42,7 @@ LOGGED_HEADERS = (
     "retry-after",
 )
 REDACTED = "***"
+DEFAULT_MAX_CHARS = 4000  # the Settings default; no committed eval call has a longer message
 
 
 @dataclass(frozen=True)
@@ -55,11 +64,13 @@ class CallLogger:
         self,
         *,
         log_content: bool = False,
+        max_chars: int = DEFAULT_MAX_CHARS,
         path: Path | None = None,
         secrets: Iterable[str] = (),
         sink: Callable[[str], None] | None = None,
     ) -> None:
         self.log_content = log_content
+        self.max_chars = max_chars
         self.path = Path(path) if path is not None else None
         self.secrets = tuple(s for s in secrets if s)
         self._lock = threading.Lock()
@@ -71,6 +82,7 @@ class CallLogger:
     def from_settings(cls, settings: Settings) -> CallLogger:
         return cls(
             log_content=settings.llm_log_content,
+            max_chars=settings.llm_log_max_chars,
             path=settings.llm_log_path,
             secrets=[settings.groq_api_key.get_secret_value()],
         )
@@ -94,7 +106,7 @@ class CallLogger:
             }
         )
         if self.log_content:
-            record["gen_ai.output.text"] = result.content
+            record["gen_ai.output.text"] = self._clip(result.content)
         self._write(record)
 
     def failure(self, error_type: str, detail: str, ctx: CallContext, latency_ms: int) -> None:
@@ -123,8 +135,21 @@ class CallLogger:
             "llm.input_chars": sum(len(m.get("content", "")) for m in ctx.messages),
         }
         if self.log_content:
-            record["gen_ai.input.messages"] = [dict(m) for m in ctx.messages]
+            record["gen_ai.input.messages"] = [
+                {**m, "content": self._clip(m.get("content", ""))} for m in ctx.messages
+            ]
         return record
+
+    def _clip(self, text: str) -> str:
+        """The text, or its first max_chars characters plus a marker of what was cut.
+
+        Secrets are redacted before the cut: a key split by the cut would no
+        longer match the whole-line redaction in _write, and its prefix would leak.
+        """
+        for secret in self.secrets:
+            text = text.replace(secret, REDACTED)
+        cut = len(text) - self.max_chars
+        return text if cut <= 0 else f"{text[: self.max_chars]}...[clipped {cut} chars]"
 
     def _write(self, record: dict[str, Any]) -> None:
         line = json.dumps(record, ensure_ascii=False, default=str)

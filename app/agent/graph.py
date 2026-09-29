@@ -304,15 +304,18 @@ class Agent:
 
         return g.compile()
 
-    def ask(self, question, history=None):
+    def ask(self, question, history=None, request_id=None):
         """Entry point. Returns a plain dict for the API layer.
 
         `sql` is the SQL that passed validation (and was executed), or None when
         nothing passed: rejected SQL is never presented as the query that ran.
         `error` is an SqlErrorCode or LLM_* value, never database or provider text.
         `usage` totals this question's model calls (not sent to API clients).
+        `request_id` is the id created at HTTP entry (D55), so the response, its
+        log lines and its LLM calls share one id; callers without one (evals,
+        tests) get a fresh uuid4.
         """
-        request_id = str(uuid.uuid4())
+        request_id = request_id or str(uuid.uuid4())
         try:
             final = self._graph.invoke(
                 {

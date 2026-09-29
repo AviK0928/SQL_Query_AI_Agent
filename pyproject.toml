@@ -132,7 +132,8 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
-module = ["app.sql.*", "app.llm.*", "app.prompts.*"]  # app.prompts.*: package + loader (Phase 7)
+# app.prompts.*: package + loader (Phase 7); app.observability.*: logging (Phase 9)
+module = ["app.sql.*", "app.llm.*", "app.prompts.*", "app.observability.*"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true
