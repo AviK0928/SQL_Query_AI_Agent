@@ -11,7 +11,7 @@ existing policy takes over (fallback model, or LLM_RATE_LIMITED).
 Groq's own view wins when it disagrees: a 429 blocks the model for every
 caller, `x-ratelimit-remaining-tokens` caps the token bucket, and
 `x-ratelimit-remaining-requests` (per day) raises the daily request count.
-Daily counters are in memory and reset on restart (README L7).
+Daily counters are in memory and reset on restart (RECORDS.md L7).
 Spring comparison: Resilience4j RateLimiter, one instance per downstream model.
 """
 

@@ -1,4 +1,4 @@
-# Fails a pull request whose title is not a conventional commit (README P15).
+# Fails a pull request whose title is not a conventional commit (RECORDS.md P15).
 # The squash-merge commit message is the PR title (P10), so this keeps main's
 # history conventional. Re-runs when the title is edited.
 name: pr-title

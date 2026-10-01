@@ -3,7 +3,7 @@
 #
 # Revisions are pinned. ruff's rev must equal the ruff pin in pyproject.toml so
 # the hook and CI lint identically; the other revs are set by
-# `pre-commit autoupdate --repo <url>` and recorded in the README (P8).
+# `pre-commit autoupdate --repo <url>` and recorded in RECORDS.md (P8).
 
 exclude: ^(evals/baseline/results/|database/ecommerce\.db$)
 

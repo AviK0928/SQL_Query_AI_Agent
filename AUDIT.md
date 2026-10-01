@@ -208,10 +208,10 @@ The findings above are the Phase 0 snapshot and are kept as recorded.
 
 | Finding | Status | Record |
 |---|---|---|
-| A-02 silent truncation | Fixed for the row cap in Phase 3: the cap is enforced in code and `truncated` is exact. The prompt's own `LIMIT 100` remains and is disclosed through `limit_reached`. | README D19, L5 |
-| A-03 regex validator | Resolved in Phase 3: replaced by sqlglot AST validation. | README D18, S1 |
-| Test gap: no property tests on the validator | Closed in Phase 3. | README T6 |
-| Test gap: no test that a model-imposed LIMIT is disclosed | Closed in Phase 3 (`test_limit_reached_*`). | README D19 |
+| A-02 silent truncation | Fixed for the row cap in Phase 3: the cap is enforced in code and `truncated` is exact. The prompt's own `LIMIT 100` remains and is disclosed through `limit_reached`. | RECORDS.md D19, L5 |
+| A-03 regex validator | Resolved in Phase 3: replaced by sqlglot AST validation. | RECORDS.md D18, S1 |
+| Test gap: no property tests on the validator | Closed in Phase 3. | RECORDS.md T6 |
+| Test gap: no test that a model-imposed LIMIT is disclosed | Closed in Phase 3 (`test_limit_reached_*`). | RECORDS.md D19 |
 | A-22 unrequested personal data | Open; prompt work in Phase 7. | — |
-| A-05 no 429 defences | Resolved in Phase 4: client-side rate limiter, `retry-after`, retries with backoff, fallback model, response cache and token accounting. | README D23, V1 |
-| A-21 silent guess on ambiguous questions | Resolved in Phase 5: the CLARIFY rule; b08 now asks which measure "best" means. | README D27, V3 |
+| A-05 no 429 defences | Resolved in Phase 4: client-side rate limiter, `retry-after`, retries with backoff, fallback model, response cache and token accounting. | RECORDS.md D23, V1 |
+| A-21 silent guess on ambiguous questions | Resolved in Phase 5: the CLARIFY rule; b08 now asks which measure "best" means. | RECORDS.md D27, V3 |

@@ -2,7 +2,7 @@
 
 Models are chosen **per role**, on evidence from `evals/`, by the rules below.
 These rules were fixed on 25 Sep 2026, **before any selection run**, so no
-weight or target can be tuned to fit the results (README D31). Changing a rule
+weight or target can be tuned to fit the results (RECORDS.md D31). Changing a rule
 later is a new decision with its own record, never a silent edit.
 
 ## Roles
@@ -75,7 +75,7 @@ overlap. Ties go to higher correctness, then higher efficiency.
 1. Re-read the Groq catalog and limits on the run date; apply the gates.
 2. **Smoke run:** every candidate on ~15 items across all tiers; drop clear failures.
 3. **Full run:** the top 2–3 candidates on the full suites, **3 repeats** each, temperature 0.
-4. Score, report with intervals, apply the tie rule, record the choice as a README `D#` entry.
+4. Score, report with intervals, apply the tie rule, record the choice as a `D#` entry in RECORDS.md.
 5. Put the chosen model IDs in configuration (`GROQ_MODEL`, `LLM_ROLE_MODELS`, `GROQ_FALLBACK_MODEL`), never in code.
 
 ## 5. Re-selection triggers
