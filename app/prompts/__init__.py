@@ -1,7 +1,7 @@
 """Prompt assembly for the SQL agent.
 
 Everything the LLM ever sees is assembled here, from the versioned files in this
-package (see loader.py). Prompts are not a security boundary (D2 in the README):
+package (see loader.py). Prompts are not a security boundary (D2 in RECORDS.md):
 the guarantees are enforced in code by app/sql/validator.py and
 app/sql/executor.py. Instructions here reduce retries and cost, nothing more.
 

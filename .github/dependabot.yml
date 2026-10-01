@@ -1,5 +1,5 @@
 # Weekly update PRs. Every PR runs CI, so an update merges only if the gate is green.
-# Updates are grouped so sibling PRs cannot conflict on the same pyproject.toml lines (README P11).
+# Updates are grouped so sibling PRs cannot conflict on the same pyproject.toml lines (RECORDS.md P11).
 version: 2
 updates:
   - package-ecosystem: github-actions

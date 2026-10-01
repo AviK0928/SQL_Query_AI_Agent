@@ -466,7 +466,7 @@ After Phase 3 the code knew that baseline item b13 was partial: the model's own
 The Phase 0 grader still failed it, because it only credits the `truncated`
 flag. Updating the grader would have turned b13 into a pass and made the
 numbers look better, while silently breaking the comparison with every earlier
-run. The grader stayed frozen; the gap is recorded (README L8) and handled by
+run. The grader stayed frozen; the gap is recorded (RECORDS.md L8) and handled by
 the Phase 6 harness, where the new grading is measured on its own.
 
 ---
