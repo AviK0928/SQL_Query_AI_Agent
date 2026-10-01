@@ -18,11 +18,11 @@ authors = [{ name = "Aviraj Khanchi" }]
 # groq 0.37.1, pydantic 2.13.5 (recorded as a D-entry in Phase 1).
 dependencies = [
     "fastapi==0.141.1",
-    "uvicorn[standard]==0.53.0",
-    "sqlglot==30.19.0",
+    "uvicorn[standard]==0.54.0",
+    "sqlglot==30.20.0",
     "groq==0.37.1",  # called directly by app/llm/client.py
     "tenacity==9.1.4",  # the only LLM retry layer
-    "langgraph==1.2.11",
+    "langgraph==1.2.12",
     "python-dotenv==1.2.3",       # read by pydantic-settings for .env support
     "pydantic-settings==2.15.0",  # typed, validated config (Phase 1 step 4)
 ]
@@ -30,11 +30,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest==9.1.1",               # 8.4.2 had PYSEC-2026-1845 (pip-audit, S5)
-    "hypothesis==6.168.1",
+    "hypothesis==6.168.3",
     "mutmut==3.8.0",
     "httpx==0.28.1",              # FastAPI TestClient transport
     "pytest-cov==7.1.0",
-    "ruff==0.16.8",
+    "ruff==0.16.9",
     "mypy==2.3.1",
     "pre-commit==4.6.2",
     "bandit[toml]==1.9.4",        # security lint of app/ (CI)
