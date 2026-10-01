@@ -124,33 +124,6 @@ Open http://localhost:8000
 A free Groq API key takes about a minute at
 [console.groq.com](https://console.groq.com) — email sign-up, no credit card.
 
-### Colab quickstart
-
-Development runs in Google Colab (the project's only environment). From nothing
-to a passing test suite and a first live eval:
-
-1. In Colab, **File › Open notebook › GitHub**, repository
-   `AviK0928/SQL_Query_AI_Agent`, branch `main`, file `notebooks/dev.ipynb`.
-2. In the Secrets panel (key icon) add, with notebook access on:
-   `GROQ_API_KEY` (free at console.groq.com), `LLM_LIMITS` (the Groq console
-   limits as one-line JSON, see Configuration), and `GITHUB_PAT` only if you
-   will push.
-3. Run Cells **0, 1, 2, 3, 5, 7, 8**: helpers, Python version check, secrets,
-   persistence folder, clone, project venv and install, git hooks. Cell 6 (git
-   identity) and Cell 12 (`commit_and_push`) are needed only to commit.
-4. Run **Cell 9**, the quality gate CI runs: ruff, ruff format, mypy, and the
-   offline pytest suite at 100% coverage. No API key is used; it ends with
-   `QUALITY GATE PASSED`.
-5. Run **Cell 10** to start the app in the VM and hit `/health`.
-6. Run **Cell 11** with `CONFIRM = False`: the eval runner prints its request
-   and token estimate against the daily quota and makes no call. Set
-   `CONFIRM = True` to run the small subset; the report lands in
-   `evals/reports/<date>-<tag>/report.md`. Long runs use Cells 11b and 11c
-   (a background process with a status cell, D36).
-
-After a VM recycle, rerun Cells 0, 1, 2, 3, 5, 6, 7, 8, 9, 12, as the notebook
-header lists (P7).
-
 ## Configuration
 
 All settings are read once at startup by `app/config.py` (D14). Missing or
